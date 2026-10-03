@@ -97,3 +97,55 @@ export const transitionWorkItemSchema = z.object({
 export type TransitionWorkItemInput = z.infer<
   typeof transitionWorkItemSchema
 >['body'];
+
+export const listWorkItemsQuerySchema = z.object({
+  query: z.object({
+    search: z.string().trim().max(100).optional(),
+    status: z
+      .enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'], {
+        errorMap: () => ({
+          message:
+            'Status must be one of: OPEN, IN_PROGRESS, BLOCKED, RESOLVED, CLOSED',
+        }),
+      })
+      .optional(),
+    priority: z
+      .enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT'], {
+        errorMap: () => ({
+          message: 'Priority must be one of: LOW, MEDIUM, HIGH, URGENT',
+        }),
+      })
+      .optional(),
+    assigneeId: z.string().trim().min(1).optional(),
+    sortBy: z
+      .enum(['createdAt', 'updatedAt', 'priority', 'status', 'title'], {
+        errorMap: () => ({
+          message:
+            'Sort field must be one of: createdAt, updatedAt, priority, status, title',
+        }),
+      })
+      .default('createdAt'),
+    sortOrder: z
+      .enum(['asc', 'desc'], {
+        errorMap: () => ({
+          message: 'Sort order must be either asc or desc',
+        }),
+      })
+      .default('desc'),
+    page: z.coerce
+      .number({ invalid_type_error: 'Page must be a number' })
+      .int('Page must be an integer')
+      .min(1, 'Page must be greater than or equal to 1')
+      .default(1),
+    limit: z.coerce
+      .number({ invalid_type_error: 'Limit must be a number' })
+      .int('Limit must be an integer')
+      .min(1, 'Limit must be greater than or equal to 1')
+      .max(100, 'Limit must be less than or equal to 100')
+      .default(20),
+  }),
+});
+
+export type ListWorkItemsQueryInput = z.infer<
+  typeof listWorkItemsQuerySchema
+>['query'];

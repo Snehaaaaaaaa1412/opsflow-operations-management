@@ -113,8 +113,12 @@ model WorkItem {
   comments  Comment[]
   activities Activity[]
 
-  // Indexes for common queries
+  // Indexes for common queries and high-throughput team filtering
   @@index([teamId])
+  @@index([teamId, status])
+  @@index([teamId, priority])
+  @@index([teamId, assigneeId])
+  @@index([teamId, createdAt])
   @@index([status])
   @@index([priority])
   @@index([assigneeId])

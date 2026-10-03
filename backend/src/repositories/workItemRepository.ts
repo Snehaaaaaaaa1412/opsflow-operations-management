@@ -46,10 +46,36 @@ export interface WorkItemEntity {
   };
 }
 
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface FindByTeamIdOptions {
+  search?: string;
+  status?: WorkItemStatus;
+  priority?: WorkItemPriority;
+  assigneeId?: string;
+  sortBy?: 'createdAt' | 'updatedAt' | 'priority' | 'status' | 'title';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export type PaginatedWorkItemsResult = WorkItemEntity[] & {
+  data: WorkItemEntity[];
+  meta: PaginationMeta;
+};
+
 export interface IWorkItemRepository {
   create(data: CreateWorkItemData): Promise<WorkItemEntity>;
   findById(id: string): Promise<WorkItemEntity | null>;
-  findByTeamId(teamId: string): Promise<WorkItemEntity[]>;
+  findByTeamId(
+    teamId: string,
+    options?: FindByTeamIdOptions
+  ): Promise<PaginatedWorkItemsResult>;
   update(id: string, data: UpdateWorkItemData): Promise<WorkItemEntity>;
   updateStatus(id: string, status: WorkItemStatus): Promise<WorkItemEntity>;
   updateWithVersion(
@@ -111,12 +137,78 @@ export class PrismaWorkItemRepository implements IWorkItemRepository {
     });
   }
 
-  async findByTeamId(teamId: string): Promise<WorkItemEntity[]> {
-    return prisma.workItem.findMany({
-      where: { teamId },
+  async findByTeamId(
+    teamId: string,
+    options: FindByTeamIdOptions = {}
+  ): Promise<PaginatedWorkItemsResult> {
+    const where: Prisma.WorkItemWhereInput = {
+      teamId,
+    };
+
+    if (options.status) {
+      where.status = options.status;
+    }
+
+    if (options.priority) {
+      where.priority = options.priority;
+    }
+
+    if (options.assigneeId !== undefined) {
+      if (options.assigneeId === 'unassigned' || options.assigneeId === 'null') {
+        where.assigneeId = null;
+      } else {
+        where.assigneeId = options.assigneeId;
+      }
+    }
+
+    if (options.search && options.search.trim().length > 0) {
+      const searchTerm = options.search.trim();
+      where.OR = [
+        { title: { contains: searchTerm, mode: 'insensitive' } },
+        { description: { contains: searchTerm, mode: 'insensitive' } },
+      ];
+    }
+
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const limit =
+      options.limit && options.limit > 0 ? Math.min(options.limit, 100) : 20;
+    const skip = (page - 1) * limit;
+
+    const sortBy = options.sortBy || 'createdAt';
+    const sortOrder = options.sortOrder || 'desc';
+
+    const orderBy: Prisma.WorkItemOrderByWithRelationInput = {
+      [sortBy]: sortOrder,
+    };
+
+    const items = await prisma.workItem.findMany({
+      where,
       include: workItemInclude,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
+      skip,
+      take: limit,
     });
+
+    const total =
+      typeof (prisma.workItem as any).count === 'function'
+        ? await prisma.workItem.count({ where })
+        : items.length;
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+    const meta: PaginationMeta = {
+      page,
+      limit,
+      total,
+      totalPages,
+    };
+
+    const result = Object.assign([...items], {
+      data: items,
+      meta,
+    });
+
+    return result as PaginatedWorkItemsResult;
   }
 
   async update(id: string, data: UpdateWorkItemData): Promise<WorkItemEntity> {

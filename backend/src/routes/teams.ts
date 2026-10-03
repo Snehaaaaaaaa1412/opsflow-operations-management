@@ -10,7 +10,10 @@ import {
 } from '../validators/teamValidators';
 
 import { workItemController } from '../controllers/workItemController';
-import { createWorkItemSchema } from '../validators/workItemValidators';
+import {
+  createWorkItemSchema,
+  listWorkItemsQuerySchema,
+} from '../validators/workItemValidators';
 import { idempotency } from '../middleware/idempotency';
 
 const router = Router();
@@ -50,6 +53,10 @@ router.post(
   validateRequest(createWorkItemSchema),
   workItemController.create
 );
-router.get('/:teamId/work-items', workItemController.listByTeam);
+router.get(
+  '/:teamId/work-items',
+  validateRequest(listWorkItemsQuerySchema),
+  workItemController.listByTeam
+);
 
 export default router;

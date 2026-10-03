@@ -329,6 +329,39 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 9 — Search, Filtering, Sorting, and Pagination
+
+### ED-023: Database-Level Search, Filtering, Sorting, and Pagination
+
+**Decision:** Enforce all work item filtering, text search, sorting, and pagination strictly within the database query layer (PostgreSQL via Prisma), rejecting any in-memory array manipulation, bounded by strict validation and backed by targeted composite indexes.
+
+**Rationale & Technical Architecture:**
+
+- **Database-Level Execution & Memory Protection:**
+  - Operations teams manage tens of thousands of active and historical work items. Fetching large result sets into Node.js application memory to filter or paginate (`array.filter()`, `array.slice()`) creates catastrophic CPU and memory spikes, increases Garbage Collection pauses, and causes out-of-memory server crashes.
+  - Pushing `where`, `orderBy`, `skip`, and `take` to PostgreSQL delegates sorting and filtering to the database engine's optimized query planner, b-tree indexes, and streaming execution, keeping backend memory usage flat and predictable (`O(limit)` rather than `O(total)`).
+- **Strictly Bounded Pagination:**
+  - `page` defaults to 1 and `limit` defaults to 20, with an enforced upper ceiling of `limit=100`.
+  - Non-positive values (`page < 1`, `limit < 1`) or requests exceeding `limit > 100` are rejected at the edge with HTTP 400 Bad Request.
+  - Bounded pagination defends against Denial of Service (DoS) attacks where a malicious client requests `limit=1000000`, exhausting database connection buffers and network bandwidth.
+- **Whitelisted Sort Fields & Direction:**
+  - Allowed sort fields are strictly whitelisted to known client-facing attributes: `createdAt`, `updatedAt`, `priority`, `status`, `title`.
+  - Sort direction is strictly constrained to `asc` or `desc`.
+  - Whitelisting protects against arbitrary column sorting that could leak internal database schema details, trigger unindexed full-table scans, or generate runtime Prisma query exceptions.
+- **Composite Index Design & Tradeoffs:**
+  - In OpsFlow, work item queries are always team-scoped (`teamId`). Standalone indexes on `status` or `priority` would require multi-index bitmap heap scans or full index scans filtered by `teamId`.
+  - Adding composite indexes leading with `teamId`:
+    - `@@index([teamId, status])`
+    - `@@index([teamId, priority])`
+    - `@@index([teamId, assigneeId])`
+    - `@@index([teamId, createdAt])`
+  - *Tradeoff:* Composite indexes consume additional disk space and slightly increase write overhead during work item creation and updates. However, for an operations management platform where read/filter/dashboard workloads dwarf write rates, sub-millisecond query latency on team-scoped operational queues is well worth the negligible write cost.
+- **Consistent Response Envelope:**
+  - Responses wrap results in `{ data: [...], meta: { page, limit, total, totalPages } }`.
+  - `total` represents the total count of matching items across all pages calculated atomically via `prisma.workItem.count({ where })`, allowing frontend clients to render accurate pagination controls.
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 

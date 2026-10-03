@@ -61,9 +61,14 @@ export class WorkItemController {
       const rawTeamId = req.params.teamId || req.params.id;
       const teamId = Array.isArray(rawTeamId) ? rawTeamId[0]! : rawTeamId!;
       const requesterId = req.user!.id;
-      const workItems = await this.service.listWorkItems(teamId, requesterId);
+      const result = await this.service.listWorkItems(
+        teamId,
+        requesterId,
+        req.query as any
+      );
       res.status(200).json({
-        data: workItems,
+        data: result.data || result,
+        meta: result.meta,
       });
     } catch (error) {
       next(error);

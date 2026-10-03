@@ -2,6 +2,7 @@ import {
   IWorkItemRepository,
   workItemRepository,
   WorkItemEntity,
+  PaginatedWorkItemsResult,
 } from '../repositories/workItemRepository';
 import { ITeamRepository, teamRepository } from '../repositories/teamRepository';
 import {
@@ -27,6 +28,7 @@ import { TeamRole, WorkItemStatus } from '@prisma/client';
 import {
   CreateWorkItemInput,
   UpdateWorkItemInput,
+  ListWorkItemsQueryInput,
 } from '../validators/workItemValidators';
 
 export class WorkItemService {
@@ -122,18 +124,20 @@ export class WorkItemService {
   }
 
   /**
-   * Lists all work items belonging to a specific team.
+   * Lists work items belonging to a specific team with optional
+   * database-level search, filtering, sorting, and pagination.
    * Enforces:
    * 1. Team existence & requester team membership (404 / 403)
    */
   async listWorkItems(
     teamId: string,
-    requesterId: string
-  ): Promise<WorkItemEntity[]> {
+    requesterId: string,
+    query: ListWorkItemsQueryInput = {}
+  ): Promise<PaginatedWorkItemsResult> {
     // Verify team exists and requester is a member
     await this.authzService.requireTeamMember(requesterId, teamId);
 
-    return this.workItemRepo.findByTeamId(teamId);
+    return this.workItemRepo.findByTeamId(teamId, query);
   }
 
   /**
