@@ -194,6 +194,31 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 4/5 — Workflow & Status Transitions
+
+### ED-019: Work Item Workflow & Status State Machine Transitions
+
+**Decision:**
+- **Explicit State Transitions vs. Generic Mutability:** Work item status can NOT be altered via generic resource updates (`PATCH /api/work-items/:id`). Status changes must pass through dedicated transition endpoints (`POST /api/work-items/:id/transition` and `PATCH /api/work-items/:id/status`) that validate business invariants against an explicit finite state machine.
+- **Allowed Finite State Transitions:**
+  - `OPEN` $\rightarrow$ `IN_PROGRESS`, `BLOCKED`, `CLOSED`
+  - `IN_PROGRESS` $\rightarrow$ `OPEN` (return to backlog), `BLOCKED`, `RESOLVED`
+  - `BLOCKED` $\rightarrow$ `OPEN`, `IN_PROGRESS` (unblocked/resumed), `CLOSED` (abandoned)
+  - `RESOLVED` $\rightarrow$ `IN_PROGRESS` (verification failure), `CLOSED` (accepted/finalized)
+  - `CLOSED` $\rightarrow$ `OPEN` (reopened)
+- **Disallowed / Illegal Transitions:**
+  - Direct resolution jumps from unworked or blocked states (e.g. `OPEN` $\rightarrow$ `RESOLVED`, `BLOCKED` $\rightarrow$ `RESOLVED`) are rejected with HTTP 400 `INVALID_STATUS_TRANSITION`.
+  - Direct transitions out of `CLOSED` to non-open states (e.g. `CLOSED` $\rightarrow$ `IN_PROGRESS`, `CLOSED` $\rightarrow$ `RESOLVED`, `CLOSED` $\rightarrow$ `BLOCKED`) are rejected with HTTP 400 `INVALID_STATUS_TRANSITION`.
+  - Self-transitions (transitioning to the exact same current status) are rejected with HTTP 400 `INVALID_STATUS_TRANSITION` ("Work item is already in status '...'").
+- **Authorization & Access Control:**
+  - Status transitions require active membership in the work item's owning team (enforced via `AuthorizationService.requireTeamMember`). Non-team callers receive HTTP 403 `FORBIDDEN`.
+  - All team member roles (`ADMIN`, `TEAM_LEAD`, and `MEMBER`) have operational agency to progress items through valid state machine transitions within their team.
+- **Validation:**
+  - Payloads are validated via `transitionWorkItemSchema` (Zod), rejecting invalid enum values or missing status attributes with HTTP 400 `VALIDATION_ERROR`.
+- **Dual REST/RPC Endpoint Support:** Both `POST /api/work-items/:id/transition` (action-oriented RPC pattern) and `PATCH /api/work-items/:id/status` (RESTful sub-resource pattern) are supported and behave identically.
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 

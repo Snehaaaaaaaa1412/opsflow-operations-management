@@ -111,6 +111,29 @@ export class WorkItemController {
       next(error);
     }
   };
+
+  transitionStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]!
+        : req.params.id!;
+      const requesterId = req.user!.id;
+      const workItem = await this.service.transitionWorkItemStatus(
+        id,
+        requesterId,
+        req.body.status
+      );
+      res.status(200).json({
+        data: workItem,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 export const workItemController = new WorkItemController();

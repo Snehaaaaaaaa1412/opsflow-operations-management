@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { workItemController } from '../controllers/workItemController';
 import { authenticate } from '../middleware/authenticate';
 import { validateRequest } from '../middleware/validate';
-import { updateWorkItemSchema } from '../validators/workItemValidators';
+import {
+  updateWorkItemSchema,
+  transitionWorkItemSchema,
+} from '../validators/workItemValidators';
 
 const router = Router();
 
@@ -17,5 +20,17 @@ router.patch(
   workItemController.update
 );
 router.delete('/:id', workItemController.delete);
+
+// Status transition endpoints
+router.post(
+  '/:id/transition',
+  validateRequest(transitionWorkItemSchema),
+  workItemController.transitionStatus
+);
+router.patch(
+  '/:id/status',
+  validateRequest(transitionWorkItemSchema),
+  workItemController.transitionStatus
+);
 
 export default router;

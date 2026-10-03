@@ -201,11 +201,11 @@ opsflow/
 This application is being developed incrementally:
 
 - [x] **Phase 0:** Project foundation and architecture
-- [ ] Phase 1: Authentication
-- [ ] Phase 2: Users and Teams
-- [ ] Phase 3: Work Items (basic CRUD)
-- [ ] Phase 4: Authorization and resource-level access
-- [ ] Phase 5: Workflow and status transitions
+- [x] **Phase 1:** Authentication (User registration, JWT login, authentication middleware)
+- [x] **Phase 2:** Users and Teams (Team management, memberships, and roles)
+- [x] **Phase 3:** Work Items (Core CRUD operations, assignment safety)
+- [x] **Phase 4:** Authorization and resource-level access (Team and work item permissions)
+- [x] **Phase 5:** Workflow and status transitions (State machine validation)
 - [ ] Phase 6: Concurrency and stale-update protection
 - [ ] Phase 7: Idempotency and duplicate-operation protection
 - [ ] Phase 8: Comments and Activity/Audit History

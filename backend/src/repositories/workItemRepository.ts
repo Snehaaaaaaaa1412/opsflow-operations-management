@@ -14,6 +14,7 @@ export interface UpdateWorkItemData {
   title?: string;
   description?: string | null;
   priority?: WorkItemPriority;
+  status?: WorkItemStatus;
   assigneeId?: string | null;
 }
 
@@ -49,6 +50,7 @@ export interface IWorkItemRepository {
   findById(id: string): Promise<WorkItemEntity | null>;
   findByTeamId(teamId: string): Promise<WorkItemEntity[]>;
   update(id: string, data: UpdateWorkItemData): Promise<WorkItemEntity>;
+  updateStatus(id: string, status: WorkItemStatus): Promise<WorkItemEntity>;
   delete(id: string): Promise<boolean>;
 }
 
@@ -110,6 +112,17 @@ export class PrismaWorkItemRepository implements IWorkItemRepository {
     return prisma.workItem.update({
       where: { id },
       data,
+      include: workItemInclude,
+    });
+  }
+
+  async updateStatus(
+    id: string,
+    status: WorkItemStatus
+  ): Promise<WorkItemEntity> {
+    return prisma.workItem.update({
+      where: { id },
+      data: { status },
       include: workItemInclude,
     });
   }

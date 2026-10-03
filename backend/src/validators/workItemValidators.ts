@@ -74,3 +74,18 @@ export const updateWorkItemSchema = z.object({
 });
 
 export type UpdateWorkItemInput = z.infer<typeof updateWorkItemSchema>['body'];
+
+export const transitionWorkItemSchema = z.object({
+  body: z.object({
+    status: z.enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'], {
+      errorMap: () => ({
+        message:
+          'Status must be one of: OPEN, IN_PROGRESS, BLOCKED, RESOLVED, CLOSED',
+      }),
+    }),
+  }),
+});
+
+export type TransitionWorkItemInput = z.infer<
+  typeof transitionWorkItemSchema
+>['body'];

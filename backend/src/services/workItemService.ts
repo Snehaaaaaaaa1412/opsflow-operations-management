@@ -18,7 +18,7 @@ import {
   NotFoundError,
   ForbiddenError,
 } from '../utils/errors';
-import { TeamRole } from '@prisma/client';
+import { TeamRole, WorkItemStatus } from '@prisma/client';
 import {
   CreateWorkItemInput,
   UpdateWorkItemInput,
@@ -206,6 +206,78 @@ export class WorkItemService {
 
     await this.workItemRepo.delete(workItemId);
   }
+
+  /**
+   * Transitions a work item's status following strict state machine rules.
+   * Enforces:
+   * 1. Work item existence (404 WORK_ITEM_NOT_FOUND)
+   * 2. Requester team membership (403 FORBIDDEN)
+   * 3. Cannot transition to identical status (400 INVALID_STATUS_TRANSITION)
+   * 4. State machine allowed transitions (400 INVALID_STATUS_TRANSITION)
+   */
+  async transitionWorkItemStatus(
+    workItemId: string,
+    requesterId: string,
+    targetStatus: WorkItemStatus
+  ): Promise<WorkItemEntity> {
+    const workItem = await this.workItemRepo.findById(workItemId);
+    if (!workItem) {
+      throw new NotFoundError(
+        'Work item not found.',
+        'WORK_ITEM_NOT_FOUND'
+      );
+    }
+
+    // Requester must belong to the work item's team
+    await this.authzService.requireTeamMember(requesterId, workItem.teamId);
+
+    // Reject transitions to the same status
+    if (workItem.status === targetStatus) {
+      throw new BadRequestError(
+        `Work item is already in status '${targetStatus}'.`,
+        'INVALID_STATUS_TRANSITION'
+      );
+    }
+
+    // Check allowed state machine transitions
+    const allowed = ALLOWED_STATUS_TRANSITIONS[workItem.status] || [];
+    if (!allowed.includes(targetStatus)) {
+      throw new BadRequestError(
+        `Invalid status transition from '${workItem.status}' to '${targetStatus}'. Allowed transitions: ${allowed.join(', ')}.`,
+        'INVALID_STATUS_TRANSITION'
+      );
+    }
+
+    return this.workItemRepo.updateStatus(workItemId, targetStatus);
+  }
 }
+
+export const ALLOWED_STATUS_TRANSITIONS: Record<
+  WorkItemStatus,
+  WorkItemStatus[]
+> = {
+  [WorkItemStatus.OPEN]: [
+    WorkItemStatus.IN_PROGRESS,
+    WorkItemStatus.BLOCKED,
+    WorkItemStatus.CLOSED,
+  ],
+  [WorkItemStatus.IN_PROGRESS]: [
+    WorkItemStatus.OPEN,
+    WorkItemStatus.BLOCKED,
+    WorkItemStatus.RESOLVED,
+  ],
+  [WorkItemStatus.BLOCKED]: [
+    WorkItemStatus.OPEN,
+    WorkItemStatus.IN_PROGRESS,
+    WorkItemStatus.CLOSED,
+  ],
+  [WorkItemStatus.RESOLVED]: [
+    WorkItemStatus.IN_PROGRESS,
+    WorkItemStatus.CLOSED,
+  ],
+  [WorkItemStatus.CLOSED]: [
+    WorkItemStatus.OPEN,
+  ],
+};
 
 export const workItemService = new WorkItemService();
