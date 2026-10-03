@@ -10,6 +10,7 @@ import {
 } from '../repositories/teamMemberRepository';
 import { TeamService } from '../services/teamService';
 import { TeamMemberService } from '../services/teamMemberService';
+import { AuthorizationService } from '../services/authorizationService';
 import { TeamRole } from '@prisma/client';
 
 // In-memory tables to simulate PostgreSQL behavior
@@ -32,11 +33,25 @@ vi.mock('../models/prisma', () => {
             return null;
           }
         ),
-        findMany: vi.fn(async () => {
-          return [...teamsTable].sort(
-            (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-          );
-        }),
+        findMany: vi.fn(
+          async ({
+            where,
+          }: {
+            where?: { members?: { some?: { userId: string } } };
+          } = {}) => {
+            let result = [...teamsTable];
+            if (where?.members?.some?.userId) {
+              const uId = where.members.some.userId;
+              const userTeamIds = teamMembersTable
+                .filter((tm) => tm.userId === uId)
+                .map((tm) => tm.teamId);
+              result = result.filter((t) => userTeamIds.includes(t.id));
+            }
+            return result.sort(
+              (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+            );
+          }
+        ),
         create: vi.fn(async ({ data }: { data: CreateTeamData }) => {
           const existing = teamsTable.find((t) => t.name === data.name);
           if (existing) {
@@ -120,6 +135,34 @@ vi.mock('../models/prisma', () => {
             user: user ? { id: user.id, name: user.name, email: user.email } : undefined,
           };
         }),
+        update: vi.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { userId_teamId: { userId: string; teamId: string } };
+            data: { role: TeamRole };
+          }) => {
+            const member = teamMembersTable.find(
+              (tm) =>
+                tm.userId === where.userId_teamId.userId &&
+                tm.teamId === where.userId_teamId.teamId
+            );
+            if (!member) {
+              const error = new Error('Record not found');
+              (error as any).code = 'P2025';
+              throw error;
+            }
+            member.role = data.role;
+            const user = usersTable.find((u) => u.id === member.userId);
+            return {
+              ...member,
+              user: user
+                ? { id: user.id, name: user.name, email: user.email }
+                : undefined,
+            };
+          }
+        ),
         delete: vi.fn(
           async ({
             where,
@@ -383,10 +426,12 @@ describe('Teams Module', () => {
   describe('TeamService Isolated Unit Tests', () => {
     it('should create and retrieve teams through repository abstraction', async () => {
       const customStore: TeamEntity[] = [];
+      const customMembers: TeamMemberEntity[] = [];
       const mockRepo = {
         findByName: async (name: string) => customStore.find((t) => t.name === name) ?? null,
         findById: async (id: string) => customStore.find((t) => t.id === id) ?? null,
         findAll: async () => [...customStore],
+        findByUserId: async (userId: string) => customStore.filter((t) => t.createdById === userId),
         create: async (data: CreateTeamData) => {
           const team: TeamEntity = {
             id: 'mock-team-1',
@@ -400,16 +445,43 @@ describe('Teams Module', () => {
         },
       };
 
-      const service = new TeamService(mockRepo);
+      const mockMemberRepo = {
+        create: async (data: CreateTeamMemberData) => {
+          const m: TeamMemberEntity = {
+            id: 'mock-tm-1',
+            teamId: data.teamId,
+            userId: data.userId,
+            role: data.role ?? TeamRole.MEMBER,
+            createdAt: new Date(),
+          };
+          customMembers.push(m);
+          return m;
+        },
+        findByTeamAndUser: async (teamId: string, userId: string) =>
+          customMembers.find((m) => m.teamId === teamId && m.userId === userId) ?? null,
+        findMembersByTeamId: async (teamId: string) =>
+          customMembers.filter((m) => m.teamId === teamId),
+        updateRole: async (teamId: string, userId: string, role: TeamRole) => {
+          const m = customMembers.find((item) => item.teamId === teamId && item.userId === userId)!;
+          m.role = role;
+          return m;
+        },
+        delete: async (teamId: string, userId: string) => true,
+      };
+
+      const authz = new AuthorizationService(mockMemberRepo, mockRepo);
+      const service = new TeamService(mockRepo, mockMemberRepo, authz);
       const team = await service.createTeam('DevOps', 'usr-test-owner');
 
       expect(team.name).toBe('DevOps');
       expect(team.createdById).toBe('usr-test-owner');
+      expect(customMembers).toHaveLength(1);
+      expect(customMembers[0].role).toBe(TeamRole.ADMIN);
 
-      const all = await service.listTeams();
+      const all = await service.listTeams('usr-test-owner');
       expect(all).toHaveLength(1);
 
-      const retrieved = await service.getTeamById('mock-team-1');
+      const retrieved = await service.getTeamById('mock-team-1', 'usr-test-owner');
       expect(retrieved.name).toBe('DevOps');
     });
   });
@@ -455,7 +527,7 @@ describe('Teams Module', () => {
           email: 'bob@opsflow.io',
         });
 
-        expect(teamMembersTable).toHaveLength(1);
+        expect(teamMembersTable).toHaveLength(2);
       });
 
       it('should add a member with explicit role (ADMIN or TEAM_LEAD)', async () => {
@@ -469,7 +541,9 @@ describe('Teams Module', () => {
 
         expect(res.status).toBe(201);
         expect(res.body.data.role).toBe('TEAM_LEAD');
-        expect(teamMembersTable[0].role).toBe('TEAM_LEAD');
+        expect(
+          teamMembersTable.find((m) => m.userId === 'usr-lead-3')?.role
+        ).toBe('TEAM_LEAD');
       });
 
       it('should return 404 when team does not exist', async () => {
@@ -514,7 +588,7 @@ describe('Teams Module', () => {
         expect(res.status).toBe(409);
         expect(res.body.error.code).toBe('MEMBER_ALREADY_EXISTS');
         expect(res.body.error.message).toBe('User is already a member of this team.');
-        expect(teamMembersTable).toHaveLength(1);
+        expect(teamMembersTable).toHaveLength(2);
       });
 
       it('should return 400 when role is invalid', async () => {
@@ -568,9 +642,10 @@ describe('Teams Module', () => {
 
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('data');
-        expect(res.body.data).toHaveLength(2);
+        expect(res.body.data).toHaveLength(3);
         expect(res.body.data).toEqual(
           expect.arrayContaining([
+            expect.objectContaining({ userId: 'usr-admin-1', role: 'ADMIN' }),
             expect.objectContaining({ userId: 'usr-member-2', role: 'MEMBER' }),
             expect.objectContaining({ userId: 'usr-lead-3', role: 'TEAM_LEAD' }),
           ])
@@ -594,7 +669,7 @@ describe('Teams Module', () => {
           .set('Authorization', `Bearer ${adminToken}`)
           .send({ userId: 'usr-member-2' });
 
-        expect(teamMembersTable).toHaveLength(1);
+        expect(teamMembersTable).toHaveLength(2);
 
         const res = await request(app)
           .delete(`/api/teams/${testTeamId}/members/usr-member-2`)
@@ -602,7 +677,7 @@ describe('Teams Module', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.data.message).toBe('Member removed successfully.');
-        expect(teamMembersTable).toHaveLength(0);
+        expect(teamMembersTable).toHaveLength(1);
       });
 
       it('should return 404 when team does not exist', async () => {
@@ -626,8 +701,16 @@ describe('Teams Module', () => {
     });
 
     describe('TeamMemberService Isolated Unit Tests', () => {
-      it('should add, list, and remove members through mocked repositories', async () => {
-        const customMembers: TeamMemberEntity[] = [];
+      it('should add, list, update, and remove members through mocked repositories', async () => {
+        const customMembers: TeamMemberEntity[] = [
+          {
+            id: 'tm-actor',
+            teamId: 'team-mock',
+            userId: 'actor-admin',
+            role: TeamRole.ADMIN,
+            createdAt: new Date(),
+          },
+        ];
         const mockMemberRepo = {
           create: async (data: CreateTeamMemberData) => {
             const m: TeamMemberEntity = {
@@ -644,6 +727,14 @@ describe('Teams Module', () => {
             customMembers.find((m) => m.teamId === tId && m.userId === uId) ?? null,
           findMembersByTeamId: async (tId: string) =>
             customMembers.filter((m) => m.teamId === tId),
+          updateRole: async (tId: string, uId: string, role: TeamRole) => {
+            const m = customMembers.find(
+              (item) => item.teamId === tId && item.userId === uId
+            );
+            if (!m) throw new Error('Not found');
+            m.role = role;
+            return m;
+          },
           delete: async (tId: string, uId: string) => {
             const idx = customMembers.findIndex(
               (m) => m.teamId === tId && m.userId === uId
@@ -669,6 +760,7 @@ describe('Teams Module', () => {
               : null,
           findByName: async () => null,
           findAll: async () => [],
+          findByUserId: async () => [],
           create: async () => {
             throw new Error('Not implemented');
           },
@@ -692,28 +784,46 @@ describe('Teams Module', () => {
           },
         };
 
+        const authzService = new AuthorizationService(
+          mockMemberRepo,
+          mockTeamRepo
+        );
         const service = new TeamMemberService(
           mockMemberRepo,
           mockTeamRepo,
-          mockUserRepo
+          mockUserRepo,
+          authzService
         );
 
         // Add
         const added = await service.addMember(
           'team-mock',
           'user-mock',
-          TeamRole.ADMIN
+          TeamRole.MEMBER,
+          'actor-admin'
         );
-        expect(added.role).toBe(TeamRole.ADMIN);
+        expect(added.role).toBe(TeamRole.MEMBER);
+
+        // Update role
+        const updated = await service.updateMemberRole(
+          'team-mock',
+          'user-mock',
+          TeamRole.TEAM_LEAD,
+          'actor-admin'
+        );
+        expect(updated.role).toBe(TeamRole.TEAM_LEAD);
 
         // List
-        const members = await service.listMembers('team-mock');
-        expect(members).toHaveLength(1);
+        const members = await service.listMembers('team-mock', 'actor-admin');
+        expect(members).toHaveLength(2); // actor-admin + user-mock
 
         // Remove
-        await service.removeMember('team-mock', 'user-mock');
-        const afterRemove = await service.listMembers('team-mock');
-        expect(afterRemove).toHaveLength(0);
+        await service.removeMember('team-mock', 'user-mock', 'actor-admin');
+        const afterRemove = await service.listMembers(
+          'team-mock',
+          'actor-admin'
+        );
+        expect(afterRemove).toHaveLength(1);
       });
     });
   });
