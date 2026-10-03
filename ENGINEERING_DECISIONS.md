@@ -119,4 +119,18 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 1B — JWT Login & Authentication
+
+### ED-014: JWT Authentication, Anti-Enumeration Generic Errors, and Minimal Payloads
+
+**Decision:**
+- Login endpoint (`POST /api/auth/login`) validates user credentials using `bcrypt.compare` against the stored `passwordHash`.
+- Both non-existent email addresses and incorrect passwords return the exact same HTTP 401 response: `{ "error": { "code": "INVALID_CREDENTIALS", "message": "Invalid email or password." } }`. This strictly prevents user/account enumeration.
+- Passwords in login requests are not trimmed to preserve exact character input, whereas emails are normalized (`.toLowerCase().trim()`) for case-insensitive authentication.
+- Signed JSON Web Tokens (JWT) are generated using a minimal payload containing only the subject identifier (`{ "sub": user.id }`), along with standard `iat` and `exp` claims. No sensitive fields (passwords, hashes, PII) are ever placed in tokens.
+- Token expiration defaults to `1h` (configurable via `JWT_EXPIRES_IN`) with HMAC SHA-256 signing via `JWT_SECRET`.
+- The login endpoint returns `{ data: { token, user } }` where `user` is mapped through `toSafeUser`, omitting all password-related fields.
+
+---
+
 *Future decisions will be added as modules are implemented.*

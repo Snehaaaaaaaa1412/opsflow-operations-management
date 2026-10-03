@@ -10,7 +10,7 @@ export const config = {
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-secret-do-not-use-in-production',
-    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+    expiresIn: process.env.JWT_EXPIRES_IN || '1h',
   },
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
