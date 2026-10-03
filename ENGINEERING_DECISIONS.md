@@ -388,6 +388,30 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 11 — Critical Integration & Correctness Testing
+
+### ED-025: Integration Testing of Critical Correctness Paths
+
+**Decision:** Establish end-to-end integration and correctness verification test suites covering the critical system boundaries and correctness invariants across both backend and frontend layers without compromising production architecture.
+
+**Rationale & Technical Architecture:**
+
+- **Why Integration Tests Were Added:**
+  - While isolated unit tests verify individual functions in isolation, operational correctness under pressure emerges from the interplay of multiple distinct systems: authentication tokens, team multi-tenancy filters, resource-level RBAC checks, state machines, OCC versions, idempotency locks, and audit append logs.
+  - Integration tests verify observable end-to-end behavior across routes, controllers, middleware, services, repositories, and UI flows without relying on implementation details.
+- **Correctness Risks Covered:**
+  - **Team Multi-Tenancy & Resource Isolation (Scenario A):** Verifies that authenticating as User A in Team A provides absolute zero visibility or mutation power over Team B work items, comments, queues, or audit history, returning strict HTTP 403 Forbidden responses.
+  - **Complete Work Item Lifecycle (Scenario B):** Validates the sequential progression of creation (`version 1`, `WORK_ITEM_CREATED`), property updates, assignee delegation, valid status progression across the state machine, collaborative comment additions and deletions, and monotonic audit chronology.
+  - **State Machine Boundaries & Invariant Protection (Scenario C):** Confirms that illegal status jumps (e.g., `OPEN` to `RESOLVED` or `CLOSED` to `RESOLVED`) fail with HTTP 400 `INVALID_STATUS_TRANSITION`, ensuring that failed transitions leave item status unmodified, do not increment concurrency versions, and produce zero false audit entries.
+  - **Optimistic Concurrency Control Under Contention (Scenario D):** Simulates true race conditions where two clients read `version 1` and submit competing updates. Validates that exactly one mutation succeeds (`version 2`), the other receives HTTP 409 `STALE_WORK_ITEM`, and the database state is never corrupted or overwritten.
+  - **Idempotent Duplicate Operations (Scenario E):** Verifies that retried requests bearing an `Idempotency-Key` return identical cached results without creating duplicate work items, double-incrementing versions, or duplicating audit entries, and that conflicting payload reuse fails with HTTP 409 `IDEMPOTENCY_KEY_REUSED`.
+  - **Role-Based Authorization Boundaries (Scenario F):** Enforces the exact authorization matrix across `ADMIN`, `TEAM_LEAD`, and `MEMBER`, verifying that `TEAM_LEAD` cannot promote to `ADMIN` or remove higher-ranking members, and that regular `MEMBER` accounts cannot alter team composition or delete work items.
+  - **Audit Log Integrity (Scenario G):** Verifies that activity records are generated strictly when mutations succeed, reflect accurate actor IDs and metadata diffs, and never leak sensitive credential hashes.
+  - **Database-Level Search & Pagination (Scenario H):** Confirms that combined filters (text search, status, priority, assignee, unassigned, ordering) and pagination bounds operate accurately while strictly preserving team isolation.
+  - **Frontend Critical UX & Concurrency Recovery (Scenario I):** Tests user workflows from login through team queues, state machine transitions, HTTP 409 conflict feedback, and instant state recovery via UI refresh.
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 
