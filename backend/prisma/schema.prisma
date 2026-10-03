@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum TeamRole {
+  ADMIN
+  TEAM_LEAD
+  MEMBER
+}
+
+enum WorkItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  RESOLVED
+  CLOSED
+}
+
+enum WorkItemPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ─── User ───────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  teamMemberships TeamMember[]
+  createdWorkItems WorkItem[] @relation("CreatedBy")
+  assignedWorkItems WorkItem[] @relation("AssignedTo")
+  comments        Comment[]
+  activities      Activity[]
+  idempotencyRecords IdempotencyRecord[]
+
+  @@map("users")
+}
+
+// ─── Team ───────────────────────────────────────────────
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  members   TeamMember[]
+  workItems WorkItem[]
+
+  @@map("teams")
+}
+
+// ─── TeamMember (join table) ────────────────────────────
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  teamId    String   @map("team_id")
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  // A user can only be a member of a team once
+  @@unique([userId, teamId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+// ─── WorkItem ───────────────────────────────────────────
+
+model WorkItem {
+  id          String           @id @default(uuid())
+  title       String
+  description String?          @db.Text
+  status      WorkItemStatus   @default(OPEN)
+  priority    WorkItemPriority @default(MEDIUM)
+  teamId      String           @map("team_id")
+  createdById String           @map("created_by_id")
+  assigneeId  String?          @map("assignee_id")
+  version     Int              @default(1)
+  dueAt       DateTime?        @map("due_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("CreatedBy", fields: [createdById], references: [id])
+  assignee  User?    @relation("AssignedTo", fields: [assigneeId], references: [id])
+  comments  Comment[]
+  activities Activity[]
+
+  // Indexes for common queries
+  @@index([teamId])
+  @@index([status])
+  @@index([priority])
+  @@index([assigneeId])
+  @@index([createdById])
+  @@index([dueAt])
+  @@index([createdAt])
+  @@map("work_items")
+}
+
+// ─── Comment ────────────────────────────────────────────
+
+model Comment {
+  id         String   @id @default(uuid())
+  workItemId String   @map("work_item_id")
+  authorId   String   @map("author_id")
+  body       String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [authorId], references: [id])
+
+  @@index([workItemId])
+  @@index([authorId])
+  @@map("comments")
+}
+
+// ─── Activity (Audit Log) ───────────────────────────────
+
+model Activity {
+  id         String   @id @default(uuid())
+  workItemId String   @map("work_item_id")
+  actorId    String   @map("actor_id")
+  action     String
+  metadata   Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([workItemId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("activities")
+}
+
+// ─── IdempotencyRecord ──────────────────────────────────
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  key            String
+  userId         String   @map("user_id")
+  operation      String
+  responseStatus Int      @map("response_status")
+  responseBody   Json?    @map("response_body") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Same user + same key = same operation (must be unique)
+  @@unique([key, userId])
+  @@index([createdAt])
+  @@map("idempotency_records")
+}
