@@ -80,18 +80,27 @@ export const updateWorkItemSchema = z.object({
 export type UpdateWorkItemInput = z.infer<typeof updateWorkItemSchema>['body'];
 
 export const transitionWorkItemSchema = z.object({
-  body: z.object({
-    status: z.enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'], {
-      errorMap: () => ({
-        message:
-          'Status must be one of: OPEN, IN_PROGRESS, BLOCKED, RESOLVED, CLOSED',
-      }),
-    }),
-    version: z
-      .number({ required_error: 'Version is required' })
-      .int('Version must be an integer')
-      .positive('Version must be a positive integer'),
-  }),
+  body: z
+    .object({
+      status: z
+        .enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'])
+        .optional(),
+      toStatus: z
+        .enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'])
+        .optional(),
+      version: z
+        .number({ required_error: 'Version is required' })
+        .int('Version must be an integer')
+        .positive('Version must be a positive integer'),
+    })
+    .refine((data) => data.status !== undefined || data.toStatus !== undefined, {
+      message: 'Status must be one of: OPEN, IN_PROGRESS, BLOCKED, RESOLVED, CLOSED',
+    })
+    .transform((data) => ({
+      status: (data.status || data.toStatus)!,
+      toStatus: (data.status || data.toStatus)!,
+      version: data.version,
+    })),
 });
 
 export type TransitionWorkItemInput = z.infer<

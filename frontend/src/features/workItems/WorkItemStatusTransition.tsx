@@ -47,6 +47,7 @@ export default function WorkItemStatusTransition({
       const res = await apiClient.post<ApiResponse<WorkItem>>(
         `/work-items/${workItem.id}/transition`,
         {
+          status: targetStatus,
           toStatus: targetStatus,
           version: workItem.version,
         }

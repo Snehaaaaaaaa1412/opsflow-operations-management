@@ -127,10 +127,11 @@ export class WorkItemController {
         ? req.params.id[0]!
         : req.params.id!;
       const requesterId = req.user!.id;
+      const targetStatus = req.body.status || req.body.toStatus;
       const workItem = await this.service.transitionWorkItemStatus(
         id,
         requesterId,
-        req.body.status,
+        targetStatus,
         req.body.version
       );
       res.status(200).json({
