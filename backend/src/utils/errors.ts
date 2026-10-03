@@ -61,3 +61,21 @@ export class ValidationError extends AppError {
     this.details = details;
   }
 }
+
+export class InvalidIdempotencyKeyError extends AppError {
+  constructor(
+    message = 'Invalid idempotency key',
+    code = 'INVALID_IDEMPOTENCY_KEY'
+  ) {
+    super(400, code, message);
+  }
+}
+
+export class IdempotencyConflictError extends AppError {
+  constructor(
+    message = 'Idempotency key has already been used with different request parameters',
+    code = 'IDEMPOTENCY_KEY_REUSED'
+  ) {
+    super(409, code, message);
+  }
+}

@@ -11,6 +11,7 @@ import {
 
 import { workItemController } from '../controllers/workItemController';
 import { createWorkItemSchema } from '../validators/workItemValidators';
+import { idempotency } from '../middleware/idempotency';
 
 const router = Router();
 
@@ -42,9 +43,10 @@ router.patch(
   teamMemberController.updateMemberRole
 );
 
-// Work Items under Teams (Phase 3)
+// Work Items under Teams (Phase 3 & Phase 7 Idempotency)
 router.post(
   '/:teamId/work-items',
+  idempotency(),
   validateRequest(createWorkItemSchema),
   workItemController.create
 );

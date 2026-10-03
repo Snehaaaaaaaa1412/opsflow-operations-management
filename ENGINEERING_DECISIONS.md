@@ -262,6 +262,42 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 7 — Idempotency & Duplicate Operation Protection
+
+### ED-021: Database-Backed Idempotency for Mutating Operations
+
+**Decision:** Implement database-backed idempotency protection using the existing `IdempotencyRecord` Prisma model, scoped per authenticated user (`@@unique([key, userId])`), with SHA-256 operation fingerprinting and atomic reservations.
+
+**Rationale & Technical Architecture:**
+
+- **Purpose & Resilience:**
+  - Operations under pressure frequently encounter retried requests caused by client double-clicks, mobile connection reconnects, browser background retries, and reverse-proxy timeouts.
+  - Without idempotency protection, retries can duplicate work items or trigger spurious workflow/concurrency errors (e.g. attempting to re-apply an already transitioned state).
+- **Target Mutating Operations:**
+  - `POST /api/teams/:teamId/work-items` (Work Item Creation)
+  - `POST /api/work-items/:id/transition` (Status Transition)
+  - `PATCH /api/work-items/:id/status` (Status Transition)
+- **Header Contract & Validation:**
+  - Clients provide the `Idempotency-Key` HTTP header (case-insensitive retrieval via Express `req.header()`).
+  - If the header is missing, execution is transparent (calls `next()` without caching or reservations).
+  - If provided, the key must be a non-empty string of up to 255 characters. Empty strings, whitespace-only keys, and keys exceeding 255 characters are rejected with HTTP 400 `INVALID_IDEMPOTENCY_KEY`.
+- **User Scoping & Isolation:**
+  - The key is strictly scoped to the authenticated `userId`: `@@unique([key, userId])`.
+  - Independent users submitting identical idempotency keys (e.g., standard client UUIDs or counters) never collide with or block one another.
+- **Operation Fingerprinting & Conflicting Reuse:**
+  - Fingerprint format: `${METHOD}:${NORMALIZED_PATH}:${SHA256(CANONICAL_BODY)}`.
+  - JSON keys are sorted recursively (`canonicalizeJson`) before hashing to guarantee deterministic fingerprint comparison regardless of JSON key serialization order.
+  - If an existing record for `(key, userId)` is found with a different fingerprint, the API rejects the request immediately with HTTP 409 `IDEMPOTENCY_KEY_REUSED` without modifying any resources.
+- **Atomic Reservation & Concurrency Safety:**
+  - To prevent concurrent duplicate requests from both executing the downstream mutation, the middleware attempts an atomic reservation insert (`responseStatus: 0`) in the database.
+  - A concurrent request attempting the same operation hits the database unique constraint (`P2002`). It catches the conflict and awaits completion (`waitForCompletion`) via polling.
+  - Once the leader request completes successfully, both requests return the exact same HTTP response and data payload without creating duplicate records.
+- **Failure Resilience & Reservation Release:**
+  - Only successful responses (`200 <= status < 300`) are stored in `IdempotencyRecord`.
+  - If an operation fails (e.g., HTTP 400 validation error, 403 authorization error, or unhandled 500 error), the pending reservation is deleted. This allows the client to correct invalid parameters and retry the operation safely.
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 

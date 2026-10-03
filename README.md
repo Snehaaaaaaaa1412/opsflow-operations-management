@@ -207,7 +207,7 @@ This application is being developed incrementally:
 - [x] **Phase 4:** Authorization and resource-level access (Team and work item permissions)
 - [x] **Phase 5:** Workflow and status transitions (State machine validation)
 - [x] **Phase 6:** Concurrency and stale-update protection (Optimistic locking via version field)
-- [ ] Phase 7: Idempotency and duplicate-operation protection
+- [x] **Phase 7:** Idempotency and duplicate-operation protection (Database-backed idempotency records, fingerprinting, atomic reservation)
 - [ ] Phase 8: Comments and Activity/Audit History
 - [ ] Phase 9: Search, filtering, sorting, and pagination
 - [ ] Phase 10: Frontend dashboard and work-management UI
