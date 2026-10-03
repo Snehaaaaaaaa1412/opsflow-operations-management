@@ -147,4 +147,20 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 2B — Team Membership & Roles
+
+### ED-016: Team Membership and Role Management
+
+**Decision:**
+- Team membership maps `User` to `Team` via the `TeamMember` join model with composite unique constraint `@@unique([userId, teamId])` and role enum `TeamRole` (`ADMIN`, `TEAM_LEAD`, `MEMBER`).
+- Endpoint `POST /api/teams/:id/members` adds a member to a team with an optional role (defaults to `MEMBER`). Validated via `addTeamMemberSchema` (Zod).
+- Checks are enforced for team existence (404 `TEAM_NOT_FOUND`), target user existence (404 `USER_NOT_FOUND`), and duplicate membership (409 `MEMBER_ALREADY_EXISTS`), with Prisma `P2002` violations caught and remapped to 409.
+- Endpoint `GET /api/teams/:id/members` lists team members with safe user representations (`id`, `name`, `email`), `role`, and membership `createdAt` timestamp.
+- Endpoint `DELETE /api/teams/:id/members/:userId` removes a team member and returns HTTP 204 No Content. Returns 404 `TEAM_NOT_FOUND` if the team does not exist, or 404 `MEMBER_NOT_FOUND` if the target user is not a member.
+- Data access is isolated behind `ITeamMemberRepository` / `PrismaTeamMemberRepository`.
+- Resource-level authorization and caller permission checks (e.g. verifying caller is ADMIN before adding/removing members) are strictly postponed to Phase 2C.
+
+---
+
 *Future decisions will be added as modules are implemented.*
+
