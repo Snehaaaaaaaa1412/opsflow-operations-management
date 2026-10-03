@@ -362,6 +362,32 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 10 — Frontend Work Management Dashboard
+
+### ED-024: Frontend Architecture, Concurrency Feedback, and State Machine UI
+
+**Decision:** Build a responsive, modular React + TanStack Query frontend consuming existing OpsFlow REST APIs, enforcing client-side session management, dynamic state-machine transition controls, optimistic concurrency conflict handling, and database-coordinated pagination.
+
+**Rationale & Technical Architecture:**
+
+- **Centralized API Client and Authentication State:**
+  - `apiClient` manages JSON serialization, unified error normalization (`ApiRequestError`), and automatic injection of the `opsflow_token` Authorization header.
+  - `AuthContext` provides declarative session lifecycle management (`login`, `register`, `logout`, `user`, `isAuthenticated`), abstracting localStorage interaction and synchronizing cache invalidation with TanStack Query (`queryClient.clear()` on logout).
+- **Protected Routing & Authoritative Backend Validation:**
+  - Route guards (`ProtectedRoute`) prevent unauthenticated navigation to operational queues (`/dashboard`, `/work-items/:id`), redirecting users to `/login` while preserving location state for seamless post-login redirection.
+  - The client treats frontend checks as a user-experience enhancement, relying strictly on authoritative backend 401/403 authorization middleware.
+- **Workflow State Machine UI Synchronization:**
+  - Rather than exposing an arbitrary status selector that might violate domain rules, `WorkItemStatusTransition` restricts selectable next statuses to strictly valid state transitions matching the backend state machine (`ALLOWED_STATUS_TRANSITIONS`).
+  - This prevents client-side frustration and invalid state changes before requests are dispatched.
+- **Graceful Optimistic Concurrency (409 Conflict) Handling:**
+  - Every update and status transition sends the current known `version`.
+  - When concurrent mutations collide, the backend issues an HTTP 409 `STALE_WORK_ITEM` conflict. The UI intercepts this error, displays an informative non-blocking banner explaining that another user updated the record, and offers an instant "Refresh" button to fetch the latest state.
+- **Server-Coordinated Pagination & Filtering:**
+  - The dashboard delegates all search, status/priority filtering, assignee scoping, sorting, and pagination to the backend API (`GET /api/teams/:teamId/work-items`).
+  - TanStack Query keys incorporate the filter state (`['work-items', selectedTeamId, filters]`), providing instant query caching, debounced transitions, and accurate page bounds using backend `meta` (`page`, `limit`, `total`, `totalPages`).
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 
