@@ -25,12 +25,13 @@ export class TeamController {
   };
 
   list = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const teams = await this.service.listTeams();
+      const userId = req.user!.id;
+      const teams = await this.service.listTeams(userId);
       res.status(200).json({
         data: teams,
       });
@@ -46,7 +47,8 @@ export class TeamController {
   ): Promise<void> => {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0]! : req.params.id;
-      const team = await this.service.getTeamById(id);
+      const userId = req.user!.id;
+      const team = await this.service.getTeamById(id, userId);
       res.status(200).json({
         data: team,
       });

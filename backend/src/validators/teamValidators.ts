@@ -30,3 +30,18 @@ export const addTeamMemberSchema = z.object({
 });
 
 export type AddTeamMemberInput = z.infer<typeof addTeamMemberSchema>['body'];
+
+export const updateTeamMemberRoleSchema = z.object({
+  body: z.object({
+    role: z.enum(['ADMIN', 'TEAM_LEAD', 'MEMBER'], {
+      errorMap: () => ({
+        message: 'Role must be one of: ADMIN, TEAM_LEAD, MEMBER',
+      }),
+    }),
+  }),
+});
+
+export type UpdateTeamMemberRoleInput = z.infer<
+  typeof updateTeamMemberRoleSchema
+>['body'];
+

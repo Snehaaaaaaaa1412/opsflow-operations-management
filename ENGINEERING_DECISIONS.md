@@ -162,5 +162,24 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 2C — Authorization & Permissions
+
+### ED-017: Resource-Level Authorization
+
+**Decision:**
+- **Authentication vs Authorization:** Authentication verifies caller identity via cryptographic JWT Bearer tokens, rejecting unauthenticated or malformed requests with HTTP 401 `UNAUTHORIZED`. Authorization determines what an authenticated user may do on a specific resource, returning HTTP 403 `FORBIDDEN` when the caller lacks membership or sufficient role permissions.
+- **Evaluation Against TeamMember:** Authorization is resource-aware and evaluated against the caller's membership in the target team (`TeamMember` join model). Global user roles or creator status (`createdById`) alone do not grant access; permissions depend strictly on the actor's `TeamRole` (`ADMIN`, `TEAM_LEAD`, `MEMBER`) within the specific team.
+- **Server-Side Enforcement:** All permission boundaries are strictly enforced on the server. Every team and membership route validates the actor's team membership and role before returning data or applying mutations, preventing horizontal privilege escalation across teams and vertical privilege escalation within teams.
+- **Explicit Roles & Hierarchy:**
+  - `ADMIN`: Full access within the team (view team, view members, add any member role, remove any member, change any member role).
+  - `TEAM_LEAD`: Operational delegation (view team, view members, add `MEMBER`, remove `MEMBER`, promote `MEMBER` to `TEAM_LEAD`). Prohibited from removing `ADMIN` or other `TEAM_LEAD`s, assigning or promoting to `ADMIN`, and demoting `ADMIN`.
+  - `MEMBER`: Read-only access within their team (view team, view members). Prohibited from adding/removing members or modifying roles.
+- **Unauthorized Team Access Returns 403:** If a team exists but the caller is not a member, the API returns HTTP 403 `FORBIDDEN`. To enforce complete resource isolation, `GET /api/teams` filters exclusively by the authenticated user's memberships (`findByUserId`), preventing cross-tenant enumeration.
+- **Centralized Authorization Service:** Permission rules are centralized within `AuthorizationService` (`requireTeamMember`, `requireTeamRole`, `canAddMember`, `canRemoveMember`, `canChangeRole`) to avoid scattering ad-hoc conditional logic across routes or controllers.
+- **Team Creator Automatic ADMIN Membership:** When a team is created (`POST /api/teams`), the creator is automatically provisioned as an `ADMIN` member in `team_members`. This prevents orphaned teams and ensures immediate, coherent resource-level access for the creator.
+
+---
+
 *Future decisions will be added as modules are implemented.*
+
 

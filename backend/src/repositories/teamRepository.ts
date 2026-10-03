@@ -19,6 +19,7 @@ export interface ITeamRepository {
   findByName(name: string): Promise<TeamEntity | null>;
   findById(id: string): Promise<TeamEntity | null>;
   findAll(): Promise<TeamEntity[]>;
+  findByUserId(userId: string): Promise<TeamEntity[]>;
   create(data: CreateTeamData): Promise<TeamEntity>;
 }
 
@@ -37,6 +38,19 @@ export class PrismaTeamRepository implements ITeamRepository {
 
   async findAll(): Promise<TeamEntity[]> {
     return prisma.team.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findByUserId(userId: string): Promise<TeamEntity[]> {
+    return prisma.team.findMany({
+      where: {
+        members: {
+          some: {
+            userId,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

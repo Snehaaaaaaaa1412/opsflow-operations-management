@@ -25,6 +25,7 @@ export interface ITeamMemberRepository {
   create(data: CreateTeamMemberData): Promise<TeamMemberEntity>;
   findByTeamAndUser(teamId: string, userId: string): Promise<TeamMemberEntity | null>;
   findMembersByTeamId(teamId: string): Promise<TeamMemberEntity[]>;
+  updateRole(teamId: string, userId: string, role: TeamRole): Promise<TeamMemberEntity>;
   delete(teamId: string, userId: string): Promise<boolean>;
 }
 
@@ -97,6 +98,33 @@ export class PrismaTeamMemberRepository implements ITeamMemberRepository {
         },
       },
       orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async updateRole(
+    teamId: string,
+    userId: string,
+    role: TeamRole
+  ): Promise<TeamMemberEntity> {
+    return prisma.teamMember.update({
+      where: {
+        userId_teamId: {
+          userId,
+          teamId,
+        },
+      },
+      data: {
+        role,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
     });
   }
 
