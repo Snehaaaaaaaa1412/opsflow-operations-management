@@ -300,6 +300,33 @@ vi.mock('../models/prisma', () => {
             };
           }
         ),
+        updateMany: vi.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { id: string; version?: number };
+            data: any;
+          }) => {
+            const item = workItemsTable.find((wi) => wi.id === where.id);
+            if (!item) return { count: 0 };
+            if (where.version !== undefined && item.version !== where.version) {
+              return { count: 0 };
+            }
+            if (data.title !== undefined) item.title = data.title;
+            if (data.description !== undefined) item.description = data.description;
+            if (data.priority !== undefined) item.priority = data.priority;
+            if (data.assigneeId !== undefined) item.assigneeId = data.assigneeId;
+            if (data.status !== undefined) item.status = data.status;
+            if (data.version?.increment) {
+              item.version += data.version.increment;
+            } else if (typeof data.version === 'number') {
+              item.version = data.version;
+            }
+            item.updatedAt = new Date();
+            return { count: 1 };
+          }
+        ),
         delete: vi.fn(async ({ where }: { where: { id: string } }) => {
           const idx = workItemsTable.findIndex((wi) => wi.id === where.id);
           if (idx === -1) {
@@ -669,12 +696,14 @@ describe('Work Items Module (Phase 3)', () => {
           title: 'Updated Title',
           description: 'Updated Description',
           priority: 'HIGH',
+          version: 1,
         });
 
       expect(res.status).toBe(200);
       expect(res.body.data.title).toBe('Updated Title');
       expect(res.body.data.description).toBe('Updated Description');
       expect(res.body.data.priority).toBe('HIGH');
+      expect(res.body.data.version).toBe(2);
     });
 
     it('should reassign work item to another member of the same team', async () => {
@@ -683,11 +712,13 @@ describe('Work Items Module (Phase 3)', () => {
         .set('Authorization', `Bearer ${leadToken}`)
         .send({
           assigneeId: leadId,
+          version: 1,
         });
 
       expect(res.status).toBe(200);
       expect(res.body.data.assigneeId).toBe(leadId);
       expect(res.body.data.assignee.id).toBe(leadId);
+      expect(res.body.data.version).toBe(2);
     });
 
     it('should unassign work item by passing null assigneeId', async () => {
@@ -696,11 +727,13 @@ describe('Work Items Module (Phase 3)', () => {
         .set('Authorization', `Bearer ${memberToken}`)
         .send({
           assigneeId: null,
+          version: 1,
         });
 
       expect(res.status).toBe(200);
       expect(res.body.data.assigneeId).toBeNull();
       expect(res.body.data.assignee).toBeNull();
+      expect(res.body.data.version).toBe(2);
     });
 
     it('should return 400 when empty body is supplied', async () => {
@@ -719,6 +752,7 @@ describe('Work Items Module (Phase 3)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           assigneeId: outsideUserId,
+          version: 1,
         });
 
       expect(res.status).toBe(400);
@@ -729,7 +763,7 @@ describe('Work Items Module (Phase 3)', () => {
       const res = await request(app)
         .patch('/api/work-items/non-existent-id')
         .set('Authorization', `Bearer ${memberToken}`)
-        .send({ title: 'New Title' });
+        .send({ title: 'New Title', version: 1 });
 
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('WORK_ITEM_NOT_FOUND');
@@ -739,7 +773,7 @@ describe('Work Items Module (Phase 3)', () => {
       const res = await request(app)
         .patch(`/api/work-items/${createdItemId}`)
         .set('Authorization', `Bearer ${outsideUserToken}`)
-        .send({ title: 'New Title' });
+        .send({ title: 'New Title', version: 1 });
 
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('FORBIDDEN');
@@ -849,6 +883,33 @@ describe('Work Items Module (Phase 3)', () => {
           item.status = status;
           return item;
         },
+        updateWithVersion: async (
+          id: string,
+          expectedVersion: number,
+          data: UpdateWorkItemData
+        ) => {
+          const item = customStore.find((i) => i.id === id)!;
+          if (item.version !== expectedVersion) {
+            throw new Error('Stale update');
+          }
+          if (data.title) item.title = data.title;
+          if (data.status) item.status = data.status;
+          item.version += 1;
+          return item;
+        },
+        updateStatusWithVersion: async (
+          id: string,
+          expectedVersion: number,
+          status: WorkItemStatus
+        ) => {
+          const item = customStore.find((i) => i.id === id)!;
+          if (item.version !== expectedVersion) {
+            throw new Error('Stale update');
+          }
+          item.status = status;
+          item.version += 1;
+          return item;
+        },
         delete: async (id: string) => {
           const idx = customStore.findIndex((i) => i.id === id);
           if (idx >= 0) {
@@ -946,8 +1007,10 @@ describe('Work Items Module (Phase 3)', () => {
       // 4. Update
       const updated = await service.updateWorkItem('wi-mock-1', 'user-admin', {
         title: 'Updated Mock Task',
+        version: 1,
       });
       expect(updated.title).toBe('Updated Mock Task');
+      expect(updated.version).toBe(2);
 
       // 5. Delete
       await service.deleteWorkItem('wi-mock-1', 'user-admin');

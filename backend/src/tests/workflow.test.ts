@@ -301,6 +301,33 @@ vi.mock('../models/prisma', () => {
             };
           }
         ),
+        updateMany: vi.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { id: string; version?: number };
+            data: any;
+          }) => {
+            const item = workItemsTable.find((wi) => wi.id === where.id);
+            if (!item) return { count: 0 };
+            if (where.version !== undefined && item.version !== where.version) {
+              return { count: 0 };
+            }
+            if (data.title !== undefined) item.title = data.title;
+            if (data.description !== undefined) item.description = data.description;
+            if (data.priority !== undefined) item.priority = data.priority;
+            if (data.assigneeId !== undefined) item.assigneeId = data.assigneeId;
+            if (data.status !== undefined) item.status = data.status;
+            if (data.version?.increment) {
+              item.version += data.version.increment;
+            } else if (typeof data.version === 'number') {
+              item.version = data.version;
+            }
+            item.updatedAt = new Date();
+            return { count: 1 };
+          }
+        ),
         delete: vi.fn(async ({ where }: { where: { id: string } }) => {
           const idx = workItemsTable.findIndex((wi) => wi.id === where.id);
           if (idx === -1) {
@@ -383,7 +410,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
 
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('UNAUTHORIZED');
@@ -393,7 +420,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post('/api/work-items/non-existent-id/transition')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('WORK_ITEM_NOT_FOUND');
@@ -405,7 +432,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${outsideUserToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('FORBIDDEN');
@@ -419,7 +446,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({});
+        .send({ version: 1 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -431,7 +458,19 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'ARCHIVED' });
+        .send({ status: 'ARCHIVED', version: 1 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should return 400 VALIDATION_ERROR when version is omitted', async () => {
+      const item = await createWorkItem();
+
+      const res = await request(app)
+        .post(`/api/work-items/${item.id}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'IN_PROGRESS' });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -446,7 +485,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'OPEN' });
+        .send({ status: 'OPEN', version: 1 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
@@ -459,7 +498,7 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'RESOLVED' });
+        .send({ status: 'RESOLVED', version: 1 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
@@ -469,17 +508,17 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
     it('should reject disallowed jump BLOCKED -> RESOLVED', async () => {
       const item = await createWorkItem();
 
-      // OPEN -> BLOCKED
+      // OPEN -> BLOCKED (version 1 -> 2)
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'BLOCKED' });
+        .send({ status: 'BLOCKED', version: 1 });
 
-      // BLOCKED -> RESOLVED (disallowed)
+      // BLOCKED -> RESOLVED (disallowed, version 2)
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'RESOLVED' });
+        .send({ status: 'RESOLVED', version: 2 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
@@ -488,17 +527,17 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
     it('should reject disallowed jump CLOSED -> IN_PROGRESS', async () => {
       const item = await createWorkItem();
 
-      // OPEN -> CLOSED
+      // OPEN -> CLOSED (version 1 -> 2)
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'CLOSED' });
+        .send({ status: 'CLOSED', version: 1 });
 
-      // CLOSED -> IN_PROGRESS (disallowed, must be reopened to OPEN first)
+      // CLOSED -> IN_PROGRESS (disallowed, must be reopened to OPEN first, version 2)
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 2 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
@@ -507,17 +546,17 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
     it('should reject disallowed jump CLOSED -> RESOLVED', async () => {
       const item = await createWorkItem();
 
-      // OPEN -> CLOSED
+      // OPEN -> CLOSED (version 1 -> 2)
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'CLOSED' });
+        .send({ status: 'CLOSED', version: 1 });
 
       // CLOSED -> RESOLVED
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'RESOLVED' });
+        .send({ status: 'RESOLVED', version: 2 });
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
@@ -528,29 +567,32 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
     it('should progress through standard delivery cycle: OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED', async () => {
       const item = await createWorkItem();
 
-      // 1. OPEN -> IN_PROGRESS
+      // 1. OPEN -> IN_PROGRESS (version 1 -> 2)
       const step1 = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
       expect(step1.status).toBe(200);
       expect(step1.body.data.status).toBe('IN_PROGRESS');
+      expect(step1.body.data.version).toBe(2);
 
-      // 2. IN_PROGRESS -> RESOLVED
+      // 2. IN_PROGRESS -> RESOLVED (version 2 -> 3)
       const step2 = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'RESOLVED' });
+        .send({ status: 'RESOLVED', version: 2 });
       expect(step2.status).toBe(200);
       expect(step2.body.data.status).toBe('RESOLVED');
+      expect(step2.body.data.version).toBe(3);
 
-      // 3. RESOLVED -> CLOSED
+      // 3. RESOLVED -> CLOSED (version 3 -> 4)
       const step3 = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'CLOSED' });
+        .send({ status: 'CLOSED', version: 3 });
       expect(step3.status).toBe(200);
       expect(step3.body.data.status).toBe('CLOSED');
+      expect(step3.body.data.version).toBe(4);
     });
 
     it('should handle blocker cycle: IN_PROGRESS -> BLOCKED -> IN_PROGRESS', async () => {
@@ -559,42 +601,45 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
-      // Mark blocked
+      // Mark blocked (version 2 -> 3)
       const blockedRes = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'BLOCKED' });
+        .send({ status: 'BLOCKED', version: 2 });
       expect(blockedRes.status).toBe(200);
       expect(blockedRes.body.data.status).toBe('BLOCKED');
+      expect(blockedRes.body.data.version).toBe(3);
 
-      // Unblock and resume
+      // Unblock and resume (version 3 -> 4)
       const resumedRes = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 3 });
       expect(resumedRes.status).toBe(200);
       expect(resumedRes.body.data.status).toBe('IN_PROGRESS');
+      expect(resumedRes.body.data.version).toBe(4);
     });
 
     it('should allow reopening closed work items (CLOSED -> OPEN)', async () => {
       const item = await createWorkItem();
 
-      // OPEN -> CLOSED
+      // OPEN -> CLOSED (version 1 -> 2)
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'CLOSED' });
+        .send({ status: 'CLOSED', version: 1 });
 
-      // CLOSED -> OPEN
+      // CLOSED -> OPEN (version 2 -> 3)
       const reopened = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'OPEN' });
+        .send({ status: 'OPEN', version: 2 });
 
       expect(reopened.status).toBe(200);
       expect(reopened.body.data.status).toBe('OPEN');
+      expect(reopened.body.data.version).toBe(3);
     });
 
     it('should allow rejecting resolution (RESOLVED -> IN_PROGRESS)', async () => {
@@ -603,21 +648,22 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'RESOLVED' });
+        .send({ status: 'RESOLVED', version: 2 });
 
-      // Verification fails -> move back to IN_PROGRESS
+      // Verification fails -> move back to IN_PROGRESS (version 3 -> 4)
       const rejected = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 3 });
 
       expect(rejected.status).toBe(200);
       expect(rejected.body.data.status).toBe('IN_PROGRESS');
+      expect(rejected.body.data.version).toBe(4);
     });
 
     it('should allow returning active work to backlog (IN_PROGRESS -> OPEN)', async () => {
@@ -626,15 +672,16 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       const backToQueue = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'OPEN' });
+        .send({ status: 'OPEN', version: 2 });
 
       expect(backToQueue.status).toBe(200);
       expect(backToQueue.body.data.status).toBe('OPEN');
+      expect(backToQueue.body.data.version).toBe(3);
     });
 
     it('should allow immediate blocking of open work (OPEN -> BLOCKED) and return to OPEN (BLOCKED -> OPEN)', async () => {
@@ -643,16 +690,18 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const blocked = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'BLOCKED' });
+        .send({ status: 'BLOCKED', version: 1 });
       expect(blocked.status).toBe(200);
       expect(blocked.body.data.status).toBe('BLOCKED');
+      expect(blocked.body.data.version).toBe(2);
 
       const unblocked = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'OPEN' });
+        .send({ status: 'OPEN', version: 2 });
       expect(unblocked.status).toBe(200);
       expect(unblocked.body.data.status).toBe('OPEN');
+      expect(unblocked.body.data.version).toBe(3);
     });
 
     it('should allow abandoning blocked item directly (BLOCKED -> CLOSED)', async () => {
@@ -661,15 +710,16 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'BLOCKED' });
+        .send({ status: 'BLOCKED', version: 1 });
 
       const closed = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'CLOSED' });
+        .send({ status: 'CLOSED', version: 2 });
 
       expect(closed.status).toBe(200);
       expect(closed.body.data.status).toBe('CLOSED');
+      expect(closed.body.data.version).toBe(3);
     });
   });
 
@@ -680,10 +730,11 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .patch(`/api/work-items/${item.id}/status`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('IN_PROGRESS');
+      expect(res.body.data.version).toBe(2);
     });
   });
 
@@ -694,10 +745,11 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${leadToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('IN_PROGRESS');
+      expect(res.body.data.version).toBe(2);
     });
 
     it('should allow MEMBER to perform valid status transition', async () => {
@@ -706,10 +758,11 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const res = await request(app)
         .post(`/api/work-items/${item.id}/transition`)
         .set('Authorization', `Bearer ${memberToken}`)
-        .send({ status: 'IN_PROGRESS' });
+        .send({ status: 'IN_PROGRESS', version: 1 });
 
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('IN_PROGRESS');
+      expect(res.body.data.version).toBe(2);
     });
   });
 
@@ -740,6 +793,33 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
         updateStatus: async (id: string, status: WorkItemStatus) => {
           const item = customStore.find((i) => i.id === id)!;
           item.status = status;
+          return item;
+        },
+        updateWithVersion: async (
+          id: string,
+          expectedVersion: number,
+          data: UpdateWorkItemData
+        ) => {
+          const item = customStore.find((i) => i.id === id)!;
+          if (item.version !== expectedVersion) {
+            throw new Error('Stale update');
+          }
+          if (data.title) item.title = data.title;
+          if (data.status) item.status = data.status;
+          item.version += 1;
+          return item;
+        },
+        updateStatusWithVersion: async (
+          id: string,
+          expectedVersion: number,
+          status: WorkItemStatus
+        ) => {
+          const item = customStore.find((i) => i.id === id)!;
+          if (item.version !== expectedVersion) {
+            throw new Error('Stale update');
+          }
+          item.status = status;
+          item.version += 1;
           return item;
         },
         delete: async () => true,
@@ -816,16 +896,19 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
       const result = await service.transitionWorkItemStatus(
         'wi-unit-1',
         adminId,
-        WorkItemStatus.IN_PROGRESS
+        WorkItemStatus.IN_PROGRESS,
+        1
       );
       expect(result.status).toBe(WorkItemStatus.IN_PROGRESS);
+      expect(result.version).toBe(2);
 
       // 2. Reject transition to current status
       await expect(
         service.transitionWorkItemStatus(
           'wi-unit-1',
           adminId,
-          WorkItemStatus.IN_PROGRESS
+          WorkItemStatus.IN_PROGRESS,
+          2
         )
       ).rejects.toThrow('already in status');
 
@@ -834,7 +917,8 @@ describe('Workflow & Status Transitions Module (Phase 5)', () => {
         service.transitionWorkItemStatus(
           'wi-unit-1',
           adminId,
-          WorkItemStatus.CLOSED
+          WorkItemStatus.CLOSED,
+          2
         )
       ).rejects.toThrow('Invalid status transition');
     });
