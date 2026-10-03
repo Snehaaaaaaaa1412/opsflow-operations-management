@@ -412,7 +412,26 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
-*Future decisions will be added as modules are implemented.*
+## Phase 12 — Documentation, Architecture, and Production Readiness
+
+### ED-026: Architecture Visualization, Cloud-Native Persistence, and Documentation Integrity
+
+**Decision:** Formalize comprehensive system architecture documentation, complete Mermaid diagram specifications, and document the cloud-native serverless PostgreSQL persistence strategy and deployment topology.
+
+**Rationale & Technical Architecture:**
+
+- **Mermaid-Native Architectural Diagrams:**
+  - Standard markdown flowcharts, sequence diagrams, and entity-relationship models (`erDiagram`, `sequenceDiagram`, `stateDiagram-v2`, `flowchart TD`) are embedded directly in repository documentation (`docs/architecture.md`).
+  - This ensures that all architectural artifacts remain version-controlled, directly rendered in GitHub and standard markdown previewers, and perpetually synchronized with code changes.
+- **Serverless PostgreSQL (Neon) Compatibility:**
+  - Verified and confirmed seamless compatibility with serverless PostgreSQL architectures (specifically Neon Serverless Postgres with SSL connection parameters).
+  - Ensured that composite uniqueness constraints, JSONB column serialization, and monotonic version counters operate consistently across both cloud-hosted PostgreSQL instances and local environments.
+- **Contract Resilience & Interoperability:**
+  - Standardized request/response interfaces across frontend and backend boundaries to accept polymorphic mutation fields (e.g. supporting both `status` and `toStatus` in work item status transitions), preventing subtle contract regressions across decoupled deployments.
+- **Documentation Completeness:**
+  - Up-to-date tracking of engineering decisions, technical trade-offs, architecture layers, and known limitations across dedicated root documentation files (`docs/architecture.md`, `ENGINEERING_DECISIONS.md`, `KNOWN_LIMITATIONS.md`, `README.md`).
+
+---
 
 
 

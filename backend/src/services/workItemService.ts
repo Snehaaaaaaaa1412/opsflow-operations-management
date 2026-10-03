@@ -132,7 +132,7 @@ export class WorkItemService {
   async listWorkItems(
     teamId: string,
     requesterId: string,
-    query: ListWorkItemsQueryInput = {}
+    query: Partial<ListWorkItemsQueryInput> = {}
   ): Promise<PaginatedWorkItemsResult> {
     // Verify team exists and requester is a member
     await this.authzService.requireTeamMember(requesterId, teamId);
