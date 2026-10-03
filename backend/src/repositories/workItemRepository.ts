@@ -1,5 +1,6 @@
 import { prisma } from '../models/prisma';
 import { WorkItemPriority, WorkItemStatus, Prisma } from '@prisma/client';
+import { ConflictError, NotFoundError } from '../utils/errors';
 
 export interface CreateWorkItemData {
   title: string;
@@ -51,6 +52,16 @@ export interface IWorkItemRepository {
   findByTeamId(teamId: string): Promise<WorkItemEntity[]>;
   update(id: string, data: UpdateWorkItemData): Promise<WorkItemEntity>;
   updateStatus(id: string, status: WorkItemStatus): Promise<WorkItemEntity>;
+  updateWithVersion(
+    id: string,
+    expectedVersion: number,
+    data: UpdateWorkItemData
+  ): Promise<WorkItemEntity>;
+  updateStatusWithVersion(
+    id: string,
+    expectedVersion: number,
+    status: WorkItemStatus
+  ): Promise<WorkItemEntity>;
   delete(id: string): Promise<boolean>;
 }
 
@@ -125,6 +136,49 @@ export class PrismaWorkItemRepository implements IWorkItemRepository {
       data: { status },
       include: workItemInclude,
     });
+  }
+
+  async updateWithVersion(
+    id: string,
+    expectedVersion: number,
+    data: UpdateWorkItemData
+  ): Promise<WorkItemEntity> {
+    const result = await prisma.workItem.updateMany({
+      where: {
+        id,
+        version: expectedVersion,
+      },
+      data: {
+        ...data,
+        version: {
+          increment: 1,
+        },
+      },
+    });
+
+    if (result.count === 0) {
+      const existing = await prisma.workItem.findUnique({
+        where: { id },
+      });
+      if (!existing) {
+        throw new NotFoundError('Work item not found.', 'WORK_ITEM_NOT_FOUND');
+      }
+      throw new ConflictError(
+        'The work item has been modified since it was last read.',
+        'STALE_WORK_ITEM'
+      );
+    }
+
+    const updated = await this.findById(id);
+    return updated!;
+  }
+
+  async updateStatusWithVersion(
+    id: string,
+    expectedVersion: number,
+    status: WorkItemStatus
+  ): Promise<WorkItemEntity> {
+    return this.updateWithVersion(id, expectedVersion, { status });
   }
 
   async delete(id: string): Promise<boolean> {

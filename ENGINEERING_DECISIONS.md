@@ -219,6 +219,49 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 6 — Concurrency & Stale Update Protection
+
+### ED-020: Optimistic Concurrency Control & Stale-Update Protection
+
+**Decision:**
+- **Optimistic Concurrency Model (`WorkItem.version`):**
+  - Work items maintain an integer `version` field initialized to `1` upon creation.
+  - Every mutating operation on existing work items (`PATCH /api/work-items/:id` and status transitions via `POST /api/work-items/:id/transition` or `PATCH /api/work-items/:id/status`) requires the client to supply the `version` it read.
+  - On every successful update or status transition, `version` is atomically incremented by exactly `+1` (`version: { increment: 1 }`).
+- **Why Versioning is Used:**
+  - High-stress operational systems have multiple team members viewing, updating, and transitioning work items concurrently.
+  - Without versioning, a user submitting changes based on an outdated view would silently overwrite edits made by a coworker ("lost update anomaly").
+  - Optimistic locking avoids the performance overhead, lock contention, and deadlock hazards of pessimistic database row locks (`SELECT FOR UPDATE`), providing high throughput under normal operation while guaranteeing absolute safety during conflicts.
+- **Atomic Database-Level Enforcement:**
+  - Checking the version in memory in Node.js before updating is insufficient because concurrent requests can interleave between read and write (time-of-check to time-of-use race condition).
+  - Concurrency checks must execute atomically within the database engine:
+    ```sql
+    UPDATE work_items
+    SET ..., version = version + 1, updated_at = NOW()
+    WHERE id = :id AND version = :expectedVersion;
+    ```
+  - Executed in Prisma via `prisma.workItem.updateMany({ where: { id, version: expectedVersion }, data: { ...fields, version: { increment: 1 } } })`.
+  - If the affected rows count is `0`, the update is rejected because the target row's version was already changed by a prior committed transaction (or does not exist).
+- **HTTP 409 Conflict (`STALE_WORK_ITEM`):**
+  - When a stale version is detected, the API immediately halts mutation and returns HTTP 409 Conflict with envelope:
+    ```json
+    {
+      "error": {
+        "code": "STALE_WORK_ITEM",
+        "message": "The work item has been modified since it was last read."
+      }
+    }
+    ```
+  - Database internals are never exposed. The client can re-fetch the latest state (`GET /api/work-items/:id`), present differences to the user, and re-attempt.
+- **Workflow State Machine Integration:**
+  - Status transitions validate both state machine rules (`ALLOWED_STATUS_TRANSITIONS`) and version invariants simultaneously.
+  - A transition fails atomically if either the transition path is invalid or the expected version is stale.
+- **Client Contract & Schema Validation:**
+  - The `version` attribute is strictly required in request bodies for `updateWorkItemSchema` and `transitionWorkItemSchema`. It must be a positive integer (`z.number().int().positive()`). Arbitrary strings, negative values, and non-integer values are rejected with HTTP 400 `VALIDATION_ERROR`.
+  - Non-mutating read operations (`GET`) and deletions (`DELETE`) do not require version checks.
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 

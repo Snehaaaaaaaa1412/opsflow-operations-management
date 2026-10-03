@@ -125,7 +125,8 @@ export class WorkItemController {
       const workItem = await this.service.transitionWorkItemStatus(
         id,
         requesterId,
-        req.body.status
+        req.body.status,
+        req.body.version
       );
       res.status(200).json({
         data: workItem,

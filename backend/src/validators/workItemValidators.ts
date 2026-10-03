@@ -35,6 +35,10 @@ export type CreateWorkItemInput = z.infer<typeof createWorkItemSchema>['body'];
 export const updateWorkItemSchema = z.object({
   body: z
     .object({
+      version: z
+        .number({ required_error: 'Version is required' })
+        .int('Version must be an integer')
+        .positive('Version must be a positive integer'),
       title: z
         .string()
         .trim()
@@ -83,6 +87,10 @@ export const transitionWorkItemSchema = z.object({
           'Status must be one of: OPEN, IN_PROGRESS, BLOCKED, RESOLVED, CLOSED',
       }),
     }),
+    version: z
+      .number({ required_error: 'Version is required' })
+      .int('Version must be an integer')
+      .positive('Version must be a positive integer'),
   }),
 });
 

@@ -206,7 +206,7 @@ This application is being developed incrementally:
 - [x] **Phase 3:** Work Items (Core CRUD operations, assignment safety)
 - [x] **Phase 4:** Authorization and resource-level access (Team and work item permissions)
 - [x] **Phase 5:** Workflow and status transitions (State machine validation)
-- [ ] Phase 6: Concurrency and stale-update protection
+- [x] **Phase 6:** Concurrency and stale-update protection (Optimistic locking via version field)
 - [ ] Phase 7: Idempotency and duplicate-operation protection
 - [ ] Phase 8: Comments and Activity/Audit History
 - [ ] Phase 9: Search, filtering, sorting, and pagination

@@ -17,6 +17,7 @@ import {
   BadRequestError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
 } from '../utils/errors';
 import { TeamRole, WorkItemStatus } from '@prisma/client';
 import {
@@ -140,6 +141,14 @@ export class WorkItemService {
     // Requester must belong to the work item's team
     await this.authzService.requireTeamMember(requesterId, workItem.teamId);
 
+    // Stale update protection
+    if (workItem.version !== input.version) {
+      throw new ConflictError(
+        'The work item has been modified since it was last read.',
+        'STALE_WORK_ITEM'
+      );
+    }
+
     // If assigneeId is provided and non-null, verify assignee belongs to the same team
     if (input.assigneeId !== undefined && input.assigneeId !== null) {
       const assigneeUser = await this.userRepo.findById(input.assigneeId);
@@ -160,7 +169,7 @@ export class WorkItemService {
       }
     }
 
-    return this.workItemRepo.update(workItemId, {
+    return this.workItemRepo.updateWithVersion(workItemId, input.version, {
       title: input.title,
       description: input.description,
       priority: input.priority,
@@ -208,17 +217,20 @@ export class WorkItemService {
   }
 
   /**
-   * Transitions a work item's status following strict state machine rules.
+   * Transitions a work item's status following strict state machine rules
+   * and optimistic concurrency version checking.
    * Enforces:
    * 1. Work item existence (404 WORK_ITEM_NOT_FOUND)
    * 2. Requester team membership (403 FORBIDDEN)
    * 3. Cannot transition to identical status (400 INVALID_STATUS_TRANSITION)
    * 4. State machine allowed transitions (400 INVALID_STATUS_TRANSITION)
+   * 5. Stale update protection via expectedVersion (409 STALE_WORK_ITEM)
    */
   async transitionWorkItemStatus(
     workItemId: string,
     requesterId: string,
-    targetStatus: WorkItemStatus
+    targetStatus: WorkItemStatus,
+    expectedVersion: number
   ): Promise<WorkItemEntity> {
     const workItem = await this.workItemRepo.findById(workItemId);
     if (!workItem) {
@@ -248,7 +260,19 @@ export class WorkItemService {
       );
     }
 
-    return this.workItemRepo.updateStatus(workItemId, targetStatus);
+    // Stale update protection
+    if (workItem.version !== expectedVersion) {
+      throw new ConflictError(
+        'The work item has been modified since it was last read.',
+        'STALE_WORK_ITEM'
+      );
+    }
+
+    return this.workItemRepo.updateStatusWithVersion(
+      workItemId,
+      expectedVersion,
+      targetStatus
+    );
   }
 }
 
