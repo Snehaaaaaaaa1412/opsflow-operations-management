@@ -9,7 +9,13 @@ import apiRouter from './routes';
 const app = express();
 
 // ─── Global Middleware ──────────────────────────────────
-app.use(cors({ origin: config.cors.origin }));
+const corsOrigin =
+  config.cors.origin === '*'
+    ? '*'
+    : config.cors.origin.includes(',')
+    ? config.cors.origin.split(',').map((s) => s.trim())
+    : config.cors.origin;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 app.use(requestLogger);
 
