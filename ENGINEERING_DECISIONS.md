@@ -106,4 +106,17 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 1A — User Registration
+
+### ED-013: User Registration, Bcrypt Hashing, and Safe User Representation
+
+**Decision:**
+- Passwords are securely hashed with `bcrypt` (10 rounds) before persistence. Plaintext passwords or hashes are strictly forbidden from being returned in API responses or written to logs.
+- Emails are normalized via `.toLowerCase().trim()` before uniqueness validation and storage to prevent duplicate accounts differing only in case or whitespace.
+- Duplicate emails are checked in `AuthService` and guarded against race conditions by intercepting Prisma `P2002` unique constraint violations in `PrismaUserRepository`, consistently mapping both to HTTP 409 `EMAIL_ALREADY_EXISTS`.
+- Input validation is decoupled using Zod schemas (`registerSchema`) executed via a generic `validateRequest` Express middleware.
+- Data access is isolated behind `IUserRepository` to decouple business logic from Prisma.
+
+---
+
 *Future decisions will be added as modules are implemented.*
