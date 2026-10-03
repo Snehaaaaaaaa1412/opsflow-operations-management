@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import app from '../app';
+import { config } from '../config';
 import { UserEntity, CreateUserData } from '../repositories/userRepository';
 import { AuthService } from '../services/authService';
 
@@ -276,6 +278,231 @@ describe('POST /api/auth/register', () => {
       expect(safeUser.email).toBe('tester@opsflow.io');
       expect((safeUser as any).passwordHash).toBeUndefined();
       expect((safeUser as any).password).toBeUndefined();
+    });
+  });
+});
+
+describe('POST /api/auth/login', () => {
+  beforeEach(async () => {
+    usersTable = [];
+    vi.clearAllMocks();
+
+    // Register a baseline user for login testing
+    const passwordHash = await bcrypt.hash('SecurePassword123', 10);
+    usersTable.push({
+      id: 'usr-baseline-123',
+      name: 'Alice',
+      email: 'alice@example.com',
+      passwordHash,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+  });
+
+  describe('Successful Authentication', () => {
+    it('should authenticate valid credentials and return 200 with JWT and safe user object', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'alice@example.com',
+        password: 'SecurePassword123',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('data');
+      expect(res.body.data).toHaveProperty('token');
+      expect(res.body.data).toHaveProperty('user');
+
+      // User object verification
+      const user = res.body.data.user;
+      expect(user.id).toBe('usr-baseline-123');
+      expect(user.name).toBe('Alice');
+      expect(user.email).toBe('alice@example.com');
+      expect(user.createdAt).toBeDefined();
+      expect(user.updatedAt).toBeDefined();
+
+      // CRITICAL SECURITY ASSERTIONS: Never leak passwords or hashes
+      expect(user).not.toHaveProperty('password');
+      expect(user).not.toHaveProperty('passwordHash');
+      expect(res.body.data).not.toHaveProperty('password');
+      expect(res.body.data).not.toHaveProperty('passwordHash');
+      expect(res.body).not.toHaveProperty('password');
+      expect(res.body).not.toHaveProperty('passwordHash');
+
+      // Token verification
+      const token = res.body.data.token;
+      expect(typeof token).toBe('string');
+
+      const decoded = jwt.verify(token, config.jwt.secret) as jwt.JwtPayload;
+      expect(decoded.sub).toBe('usr-baseline-123');
+      expect(decoded.iat).toBeDefined();
+      expect(decoded.exp).toBeDefined();
+      expect(decoded).not.toHaveProperty('password');
+      expect(decoded).not.toHaveProperty('passwordHash');
+    });
+
+    it('should normalize email on login (trim and lowercase) for case-insensitive authentication', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: '   ALICE@EXAMPLE.COM   ',
+        password: 'SecurePassword123',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.user.email).toBe('alice@example.com');
+      expect(res.body.data.token).toBeDefined();
+    });
+  });
+
+  describe('Authentication Failures (Anti-Enumeration Protection)', () => {
+    it('should return generic 401 when email does not exist', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'nonexistent@example.com',
+        password: 'SecurePassword123',
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toEqual({
+        code: 'INVALID_CREDENTIALS',
+        message: 'Invalid email or password.',
+      });
+    });
+
+    it('should return generic 401 when password is incorrect', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'alice@example.com',
+        password: 'WrongPassword999',
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toEqual({
+        code: 'INVALID_CREDENTIALS',
+        message: 'Invalid email or password.',
+      });
+    });
+
+    it('should return identical error structure for non-existent user and wrong password to prevent enumeration', async () => {
+      const nonExistentRes = await request(app).post('/api/auth/login').send({
+        email: 'ghost@example.com',
+        password: 'SomePassword123',
+      });
+
+      const wrongPasswordRes = await request(app).post('/api/auth/login').send({
+        email: 'alice@example.com',
+        password: 'WrongPassword999',
+      });
+
+      expect(nonExistentRes.status).toBe(401);
+      expect(wrongPasswordRes.status).toBe(401);
+      expect(nonExistentRes.body).toEqual(wrongPasswordRes.body);
+    });
+  });
+
+  describe('Validation Failures', () => {
+    it('should return 400 when email is invalid', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'invalid-email',
+        password: 'SecurePassword123',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'email',
+          }),
+        ])
+      );
+    });
+
+    it('should return 400 when password is shorter than 8 characters', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'alice@example.com',
+        password: 'short',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'password',
+          }),
+        ])
+      );
+    });
+
+    it('should return 400 when required fields are missing', async () => {
+      const res = await request(app).post('/api/auth/login').send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.details.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('AuthService Isolated Unit Tests for Login', () => {
+    it('should return JWT and safe user on valid credentials in unit call', async () => {
+      const passwordHash = await bcrypt.hash('UnitPass123', 10);
+      const mockRepo = {
+        findByEmail: async (email: string) => {
+          if (email === 'unit@opsflow.io') {
+            return {
+              id: 'unit-usr-999',
+              name: 'Unit Tester',
+              email: 'unit@opsflow.io',
+              passwordHash,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+          }
+          return null;
+        },
+        findById: async () => null,
+        create: async () => {
+          throw new Error('Not implemented');
+        },
+      };
+
+      const service = new AuthService(mockRepo);
+      const result = await service.login({
+        email: 'unit@opsflow.io',
+        password: 'UnitPass123',
+      });
+
+      expect(result.token).toBeDefined();
+      expect(result.user.id).toBe('unit-usr-999');
+      expect(result.user.email).toBe('unit@opsflow.io');
+      expect((result.user as any).passwordHash).toBeUndefined();
+
+      const decoded = jwt.verify(result.token, config.jwt.secret) as jwt.JwtPayload;
+      expect(decoded.sub).toBe('unit-usr-999');
+    });
+
+    it('should throw UnauthorizedError with INVALID_CREDENTIALS for wrong password in unit call', async () => {
+      const passwordHash = await bcrypt.hash('CorrectPass123', 10);
+      const mockRepo = {
+        findByEmail: async () => ({
+          id: 'unit-usr-999',
+          name: 'Unit Tester',
+          email: 'unit@opsflow.io',
+          passwordHash,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findById: async () => null,
+        create: async () => {
+          throw new Error('Not implemented');
+        },
+      };
+
+      const service = new AuthService(mockRepo);
+      await expect(
+        service.login({
+          email: 'unit@opsflow.io',
+          password: 'IncorrectPassword',
+        })
+      ).rejects.toThrow('Invalid email or password.');
     });
   });
 });
