@@ -280,6 +280,7 @@ vi.mock('../models/prisma', () => {
             if (data.description !== undefined) item.description = data.description;
             if (data.priority !== undefined) item.priority = data.priority;
             if (data.assigneeId !== undefined) item.assigneeId = data.assigneeId;
+            if (data.status !== undefined) item.status = data.status;
             item.updatedAt = new Date();
 
             const creator = usersTable.find((u) => u.id === item.createdById);
@@ -840,6 +841,12 @@ describe('Work Items Module (Phase 3)', () => {
         update: async (id: string, data: UpdateWorkItemData) => {
           const item = customStore.find((i) => i.id === id)!;
           if (data.title) item.title = data.title;
+          if (data.status) item.status = data.status;
+          return item;
+        },
+        updateStatus: async (id: string, status: WorkItemStatus) => {
+          const item = customStore.find((i) => i.id === id)!;
+          item.status = status;
           return item;
         },
         delete: async (id: string) => {
