@@ -4,10 +4,18 @@ import jwt from 'jsonwebtoken';
 import app from '../app';
 import { config } from '../config';
 import { TeamEntity, CreateTeamData } from '../repositories/teamRepository';
+import {
+  TeamMemberEntity,
+  CreateTeamMemberData,
+} from '../repositories/teamMemberRepository';
 import { TeamService } from '../services/teamService';
+import { TeamMemberService } from '../services/teamMemberService';
+import { TeamRole } from '@prisma/client';
 
-// In-memory team storage to simulate PostgreSQL behavior
+// In-memory tables to simulate PostgreSQL behavior
 let teamsTable: TeamEntity[] = [];
+let teamMembersTable: TeamMemberEntity[] = [];
+let usersTable: { id: string; name: string; email: string }[] = [];
 
 vi.mock('../models/prisma', () => {
   return {
@@ -47,8 +55,99 @@ vi.mock('../models/prisma', () => {
           return newTeam;
         }),
       },
+      teamMember: {
+        findUnique: vi.fn(
+          async ({
+            where,
+          }: {
+            where: {
+              id?: string;
+              userId_teamId?: { userId: string; teamId: string };
+            };
+          }) => {
+            let found: TeamMemberEntity | undefined;
+            if (where.userId_teamId) {
+              found = teamMembersTable.find(
+                (tm) =>
+                  tm.userId === where.userId_teamId!.userId &&
+                  tm.teamId === where.userId_teamId!.teamId
+              );
+            } else if (where.id) {
+              found = teamMembersTable.find((tm) => tm.id === where.id);
+            }
+            if (!found) return null;
+            const user = usersTable.find((u) => u.id === found!.userId);
+            return {
+              ...found,
+              user: user ? { id: user.id, name: user.name, email: user.email } : undefined,
+            };
+          }
+        ),
+        findMany: vi.fn(async ({ where }: { where: { teamId: string } }) => {
+          return teamMembersTable
+            .filter((tm) => tm.teamId === where.teamId)
+            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+            .map((tm) => {
+              const user = usersTable.find((u) => u.id === tm.userId);
+              return {
+                ...tm,
+                user: user ? { id: user.id, name: user.name, email: user.email } : undefined,
+              };
+            });
+        }),
+        create: vi.fn(async ({ data }: { data: CreateTeamMemberData }) => {
+          const existing = teamMembersTable.find(
+            (tm) => tm.userId === data.userId && tm.teamId === data.teamId
+          );
+          if (existing) {
+            const error = new Error(
+              'Unique constraint failed on the constraint: team_members_user_id_team_id_key'
+            );
+            (error as any).code = 'P2002';
+            throw error;
+          }
+          const newMember: TeamMemberEntity = {
+            id: `tm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            teamId: data.teamId,
+            userId: data.userId,
+            role: data.role ?? TeamRole.MEMBER,
+            createdAt: new Date(),
+          };
+          teamMembersTable.push(newMember);
+          const user = usersTable.find((u) => u.id === data.userId);
+          return {
+            ...newMember,
+            user: user ? { id: user.id, name: user.name, email: user.email } : undefined,
+          };
+        }),
+        delete: vi.fn(
+          async ({
+            where,
+          }: {
+            where: { userId_teamId: { userId: string; teamId: string } };
+          }) => {
+            const idx = teamMembersTable.findIndex(
+              (tm) =>
+                tm.userId === where.userId_teamId.userId &&
+                tm.teamId === where.userId_teamId.teamId
+            );
+            if (idx === -1) {
+              const error = new Error('Record not found');
+              (error as any).code = 'P2025';
+              throw error;
+            }
+            const [deleted] = teamMembersTable.splice(idx, 1);
+            return deleted;
+          }
+        ),
+      },
       user: {
-        findUnique: vi.fn(async () => null),
+        findUnique: vi.fn(async ({ where }: { where: { id?: string } }) => {
+          if (where.id) {
+            return usersTable.find((u) => u.id === where.id) ?? null;
+          }
+          return null;
+        }),
       },
     },
   };
@@ -61,6 +160,8 @@ function createTestToken(userId = 'usr-test-123'): string {
 describe('Teams Module', () => {
   beforeEach(() => {
     teamsTable = [];
+    teamMembersTable = [];
+    usersTable = [];
     vi.clearAllMocks();
   });
 
@@ -310,6 +411,310 @@ describe('Teams Module', () => {
 
       const retrieved = await service.getTeamById('mock-team-1');
       expect(retrieved.name).toBe('DevOps');
+    });
+  });
+
+  describe('Team Membership Management (Phase 2B)', () => {
+    let testTeamId: string;
+    const adminToken = createTestToken('usr-admin-1');
+
+    beforeEach(async () => {
+      // Seed a user in usersTable
+      usersTable.push(
+        { id: 'usr-admin-1', name: 'Admin Alice', email: 'alice@opsflow.io' },
+        { id: 'usr-member-2', name: 'Member Bob', email: 'bob@opsflow.io' },
+        { id: 'usr-lead-3', name: 'Lead Charlie', email: 'charlie@opsflow.io' }
+      );
+
+      // Create a test team
+      const res = await request(app)
+        .post('/api/teams')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Infrastructure Engineering' });
+
+      testTeamId = res.body.data.id;
+    });
+
+    describe('POST /api/teams/:id/members (Add Member)', () => {
+      it('should add a member with default role MEMBER and return 201', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            userId: 'usr-member-2',
+          });
+
+        expect(res.status).toBe(201);
+        expect(res.body).toHaveProperty('data');
+        expect(res.body.data.teamId).toBe(testTeamId);
+        expect(res.body.data.userId).toBe('usr-member-2');
+        expect(res.body.data.role).toBe('MEMBER');
+        expect(res.body.data.user).toMatchObject({
+          id: 'usr-member-2',
+          name: 'Member Bob',
+          email: 'bob@opsflow.io',
+        });
+
+        expect(teamMembersTable).toHaveLength(1);
+      });
+
+      it('should add a member with explicit role (ADMIN or TEAM_LEAD)', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            userId: 'usr-lead-3',
+            role: 'TEAM_LEAD',
+          });
+
+        expect(res.status).toBe(201);
+        expect(res.body.data.role).toBe('TEAM_LEAD');
+        expect(teamMembersTable[0].role).toBe('TEAM_LEAD');
+      });
+
+      it('should return 404 when team does not exist', async () => {
+        const res = await request(app)
+          .post('/api/teams/non-existent-team/members')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            userId: 'usr-member-2',
+          });
+
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('TEAM_NOT_FOUND');
+        expect(res.body.error.message).toBe('Team not found.');
+      });
+
+      it('should return 404 when user does not exist', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            userId: 'non-existent-user-id',
+          });
+
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('USER_NOT_FOUND');
+        expect(res.body.error.message).toBe('User not found.');
+      });
+
+      it('should return 409 Conflict when user is already a member of the team', async () => {
+        // First add succeeds
+        await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ userId: 'usr-member-2' });
+
+        // Duplicate add fails
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ userId: 'usr-member-2' });
+
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('MEMBER_ALREADY_EXISTS');
+        expect(res.body.error.message).toBe('User is already a member of this team.');
+        expect(teamMembersTable).toHaveLength(1);
+      });
+
+      it('should return 400 when role is invalid', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            userId: 'usr-member-2',
+            role: 'SUPERADMIN',
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      });
+
+      it('should return 400 when userId is missing', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({});
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      });
+
+      it('should return 401 when unauthenticated', async () => {
+        const res = await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .send({ userId: 'usr-member-2' });
+
+        expect(res.status).toBe(401);
+        expect(res.body.error.code).toBe('UNAUTHORIZED');
+      });
+    });
+
+    describe('GET /api/teams/:id/members (List Members)', () => {
+      it('should list all members of the team', async () => {
+        await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ userId: 'usr-member-2', role: 'MEMBER' });
+
+        await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ userId: 'usr-lead-3', role: 'TEAM_LEAD' });
+
+        const res = await request(app)
+          .get(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('data');
+        expect(res.body.data).toHaveLength(2);
+        expect(res.body.data).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ userId: 'usr-member-2', role: 'MEMBER' }),
+            expect.objectContaining({ userId: 'usr-lead-3', role: 'TEAM_LEAD' }),
+          ])
+        );
+      });
+
+      it('should return 404 when team does not exist', async () => {
+        const res = await request(app)
+          .get('/api/teams/unknown-team/members')
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('TEAM_NOT_FOUND');
+      });
+    });
+
+    describe('DELETE /api/teams/:id/members/:userId (Remove Member)', () => {
+      it('should remove member from team and return 200', async () => {
+        await request(app)
+          .post(`/api/teams/${testTeamId}/members`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ userId: 'usr-member-2' });
+
+        expect(teamMembersTable).toHaveLength(1);
+
+        const res = await request(app)
+          .delete(`/api/teams/${testTeamId}/members/usr-member-2`)
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.message).toBe('Member removed successfully.');
+        expect(teamMembersTable).toHaveLength(0);
+      });
+
+      it('should return 404 when team does not exist', async () => {
+        const res = await request(app)
+          .delete('/api/teams/unknown-team/members/usr-member-2')
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('TEAM_NOT_FOUND');
+      });
+
+      it('should return 404 when member is not in team', async () => {
+        const res = await request(app)
+          .delete(`/api/teams/${testTeamId}/members/usr-member-2`)
+          .set('Authorization', `Bearer ${adminToken}`);
+
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('MEMBER_NOT_FOUND');
+        expect(res.body.error.message).toBe('Team member not found.');
+      });
+    });
+
+    describe('TeamMemberService Isolated Unit Tests', () => {
+      it('should add, list, and remove members through mocked repositories', async () => {
+        const customMembers: TeamMemberEntity[] = [];
+        const mockMemberRepo = {
+          create: async (data: CreateTeamMemberData) => {
+            const m: TeamMemberEntity = {
+              id: 'tm-unit-1',
+              teamId: data.teamId,
+              userId: data.userId,
+              role: data.role ?? TeamRole.MEMBER,
+              createdAt: new Date(),
+            };
+            customMembers.push(m);
+            return m;
+          },
+          findByTeamAndUser: async (tId: string, uId: string) =>
+            customMembers.find((m) => m.teamId === tId && m.userId === uId) ?? null,
+          findMembersByTeamId: async (tId: string) =>
+            customMembers.filter((m) => m.teamId === tId),
+          delete: async (tId: string, uId: string) => {
+            const idx = customMembers.findIndex(
+              (m) => m.teamId === tId && m.userId === uId
+            );
+            if (idx >= 0) {
+              customMembers.splice(idx, 1);
+              return true;
+            }
+            return false;
+          },
+        };
+
+        const mockTeamRepo = {
+          findById: async (id: string) =>
+            id === 'team-mock'
+              ? {
+                  id: 'team-mock',
+                  name: 'Mock Team',
+                  createdById: 'owner-1',
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                }
+              : null,
+          findByName: async () => null,
+          findAll: async () => [],
+          create: async () => {
+            throw new Error('Not implemented');
+          },
+        };
+
+        const mockUserRepo = {
+          findById: async (id: string) =>
+            id === 'user-mock'
+              ? {
+                  id: 'user-mock',
+                  name: 'Mock User',
+                  email: 'mock@opsflow.io',
+                  passwordHash: 'hash',
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                }
+              : null,
+          findByEmail: async () => null,
+          create: async () => {
+            throw new Error('Not implemented');
+          },
+        };
+
+        const service = new TeamMemberService(
+          mockMemberRepo,
+          mockTeamRepo,
+          mockUserRepo
+        );
+
+        // Add
+        const added = await service.addMember(
+          'team-mock',
+          'user-mock',
+          TeamRole.ADMIN
+        );
+        expect(added.role).toBe(TeamRole.ADMIN);
+
+        // List
+        const members = await service.listMembers('team-mock');
+        expect(members).toHaveLength(1);
+
+        // Remove
+        await service.removeMember('team-mock', 'user-mock');
+        const afterRemove = await service.listMembers('team-mock');
+        expect(afterRemove).toHaveLength(0);
+      });
     });
   });
 });
