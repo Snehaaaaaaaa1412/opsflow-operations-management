@@ -4,12 +4,13 @@ OpsFlow is a mission-critical, enterprise operational work-management platform d
 
 ---
 
-## 🌐 Live Deployment Links
+## 🌐 Live Deployment & Demo
 
 - **🚀 Live Frontend Web App:** [https://opsflow-operations-management.vercel.app](https://opsflow-operations-management.vercel.app)
 - **⚡ Live Backend API:** [https://opsflow-operations-management-nqjp.onrender.com](https://opsflow-operations-management-nqjp.onrender.com)
   - **Health Endpoint:** [https://opsflow-operations-management-nqjp.onrender.com/api/health](https://opsflow-operations-management-nqjp.onrender.com/api/health)
 - **🗄️ Cloud Database:** Neon Serverless PostgreSQL (`ap-southeast-1` Singapore)
+- **🎥 Product Walkthrough & Testing Demo Video:** [Watch Live Walkthrough Video](https://drive.google.com/file/d/1o_HSqlz-xlf7Y-NLOuwfY4VK4BAgZSuf/view?usp=sharing)
 
 ---
 
