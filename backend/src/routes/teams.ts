@@ -9,6 +9,9 @@ import {
   updateTeamMemberRoleSchema,
 } from '../validators/teamValidators';
 
+import { workItemController } from '../controllers/workItemController';
+import { createWorkItemSchema } from '../validators/workItemValidators';
+
 const router = Router();
 
 // All team routes require authentication
@@ -38,5 +41,13 @@ router.patch(
   validateRequest(updateTeamMemberRoleSchema),
   teamMemberController.updateMemberRole
 );
+
+// Work Items under Teams (Phase 3)
+router.post(
+  '/:teamId/work-items',
+  validateRequest(createWorkItemSchema),
+  workItemController.create
+);
+router.get('/:teamId/work-items', workItemController.listByTeam);
 
 export default router;

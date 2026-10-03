@@ -180,6 +180,21 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 3 — Work Items / Core Operations
+
+### ED-018: Core Work Item Domain & Team-Scoped Operations
+
+**Decision:**
+- **Domain Entity & Defaults:** Work items represent operational tasks strictly owned by a team. Initial status defaults to `OPEN` and priority defaults to `MEDIUM`. The `version` integer field defaults to 1 for forward-compatibility with future optimistic concurrency controls.
+- **Team-Scoped Resource Access:** Work items cannot exist without an owning team. Creating (`POST /api/teams/:teamId/work-items`) and listing (`GET /api/teams/:teamId/work-items`) require caller membership in that team (403 `FORBIDDEN` otherwise). Direct operations (`GET`, `PATCH`, `DELETE` on `/api/work-items/:id`) resolve the work item's owning team and verify caller membership.
+- **Assignment Safety Boundary:** When assigning or reassigning a work item (`assigneeId`), the service layer verifies that the assignee exists and is an active member of the work item's team. Cross-team assignment attempts are rejected with HTTP 400 `INVALID_ASSIGNEE`.
+- **Role-Restricted Deletion:** Deleting work items is restricted to team `ADMIN` and `TEAM_LEAD` roles. General `MEMBER` users receive HTTP 403 `FORBIDDEN`, preventing accidental or unauthorized operational task deletion.
+- **Generic Update Boundaries:** The generic `PATCH /api/work-items/:id` endpoint allows updating `title`, `description`, `priority`, and `assigneeId` (or unassigning via `null`), but strictly disallows altering `status`, `id`, `teamId`, `createdById`, or `version`. Status transitions are intentionally deferred to dedicated workflow logic in later phases.
+- **Data Protection:** Work item responses project `createdBy` and `assignee` relations as safe user objects (`id`, `name`, `email`), ensuring password hashes and credentials are never exposed.
+
+---
+
 *Future decisions will be added as modules are implemented.*
+
 
 
