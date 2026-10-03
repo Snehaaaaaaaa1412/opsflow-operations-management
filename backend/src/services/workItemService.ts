@@ -14,6 +14,10 @@ import {
   authorizationService,
 } from './authorizationService';
 import {
+  IActivityRepository,
+  activityRepository,
+} from '../repositories/activityRepository';
+import {
   BadRequestError,
   NotFoundError,
   ForbiddenError,
@@ -31,7 +35,8 @@ export class WorkItemService {
     private teamRepo: ITeamRepository = teamRepository,
     private teamMemberRepo: ITeamMemberRepository = teamMemberRepository,
     private userRepo: IUserRepository = userRepository,
-    private authzService: AuthorizationService = authorizationService
+    private authzService: AuthorizationService = authorizationService,
+    private activityRepo: IActivityRepository = activityRepository
   ) {}
 
   /**
@@ -68,7 +73,7 @@ export class WorkItemService {
     }
 
     // 3. Create the work item
-    return this.workItemRepo.create({
+    const created = await this.workItemRepo.create({
       title: input.title,
       description: input.description,
       priority: input.priority,
@@ -76,6 +81,20 @@ export class WorkItemService {
       createdById: creatorId,
       assigneeId: input.assigneeId,
     });
+
+    // 4. Record activity audit entry
+    await this.activityRepo.create({
+      workItemId: created.id,
+      actorId: creatorId,
+      action: 'WORK_ITEM_CREATED',
+      metadata: {
+        title: created.title,
+        priority: created.priority,
+        status: created.status,
+      },
+    });
+
+    return created;
   }
 
   /**
@@ -169,12 +188,58 @@ export class WorkItemService {
       }
     }
 
-    return this.workItemRepo.updateWithVersion(workItemId, input.version, {
+    const assigneeChanged =
+      input.assigneeId !== undefined && input.assigneeId !== workItem.assigneeId;
+    const attributesChanged =
+      (input.title !== undefined && input.title !== workItem.title) ||
+      (input.description !== undefined && input.description !== workItem.description) ||
+      (input.priority !== undefined && input.priority !== workItem.priority);
+
+    const updated = await this.workItemRepo.updateWithVersion(workItemId, input.version, {
       title: input.title,
       description: input.description,
       priority: input.priority,
       assigneeId: input.assigneeId,
     });
+
+    if (assigneeChanged) {
+      await this.activityRepo.create({
+        workItemId,
+        actorId: requesterId,
+        action: 'ASSIGNEE_CHANGED',
+        metadata: {
+          from: workItem.assigneeId,
+          to: input.assigneeId ?? null,
+        },
+      });
+    }
+
+    if (attributesChanged) {
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      if (input.title !== undefined && input.title !== workItem.title) {
+        changes.title = { from: workItem.title, to: input.title };
+      }
+      if (
+        input.description !== undefined &&
+        input.description !== workItem.description
+      ) {
+        changes.description = {
+          from: workItem.description,
+          to: input.description,
+        };
+      }
+      if (input.priority !== undefined && input.priority !== workItem.priority) {
+        changes.priority = { from: workItem.priority, to: input.priority };
+      }
+      await this.activityRepo.create({
+        workItemId,
+        actorId: requesterId,
+        action: 'WORK_ITEM_UPDATED',
+        metadata: { changes },
+      });
+    }
+
+    return updated;
   }
 
   /**
@@ -212,6 +277,15 @@ export class WorkItemService {
         'FORBIDDEN'
       );
     }
+
+    await this.activityRepo.create({
+      workItemId,
+      actorId: requesterId,
+      action: 'WORK_ITEM_DELETED',
+      metadata: {
+        title: workItem.title,
+      },
+    });
 
     await this.workItemRepo.delete(workItemId);
   }
@@ -268,11 +342,24 @@ export class WorkItemService {
       );
     }
 
-    return this.workItemRepo.updateStatusWithVersion(
+    const updated = await this.workItemRepo.updateStatusWithVersion(
       workItemId,
       expectedVersion,
       targetStatus
     );
+
+    await this.activityRepo.create({
+      workItemId,
+      actorId: requesterId,
+      action: 'STATUS_CHANGED',
+      metadata: {
+        from: workItem.status,
+        to: targetStatus,
+        version: updated.version,
+      },
+    });
+
+    return updated;
   }
 }
 

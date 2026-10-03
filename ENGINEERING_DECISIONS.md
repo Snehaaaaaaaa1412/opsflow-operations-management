@@ -298,6 +298,37 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 8 — Comments & Activity/Audit History
+
+### ED-022: Activity and Audit History
+
+**Decision:** Maintain an append-only `Activity` audit trail distinct from `WorkItem` state, recording `workItemId`, `actorId`, `action`, `metadata` (structured JSONB), and `createdAt` on successful mutating operations, alongside work item collaboration comments.
+
+**Rationale & Technical Architecture:**
+
+- **Separation of Audit History from WorkItem State:**
+  - `WorkItem` represents the *current mutable state* of an operational task (its current status, priority, title, assignee, and concurrency version).
+  - An audit trail represents the *immutable chronological sequence of events* that led to that current state.
+  - Conflating current state with historical events leads to bloated entities, complex queries, and potential data corruption. By keeping `Activity` in a dedicated append-only table, query performance for current work items remains optimal while audit records cannot be altered by regular work item updates.
+- **Actor, Timestamp, and Action Triad:**
+  - Every operational change under pressure must answer: *who did what, and when?*
+  - `actorId` explicitly attributes actions to the authenticated user (`req.user.id`), preventing impersonation.
+  - `createdAt` provides unambiguous chronological sequencing for post-incident reviews, compliance audits, and team coordination.
+  - Standardized action identifiers (`WORK_ITEM_CREATED`, `WORK_ITEM_UPDATED`, `STATUS_CHANGED`, `ASSIGNEE_CHANGED`, `COMMENT_ADDED`, `COMMENT_DELETED`, `WORK_ITEM_DELETED`) enable programmatic filtering, timeline rendering, and automated alerting.
+- **Structured JSONB Metadata vs. Arbitrary Text:**
+  - Traditional text logs ("User Bob changed priority to HIGH") are brittle and difficult to localize, parse, or query programmatically.
+  - Structured JSONB metadata records exact before/after diffs (e.g., `{ changes: { priority: { from: "MEDIUM", to: "HIGH" } } }` or `{ from: "OPEN", to: "IN_PROGRESS", version: 2 }`).
+  - This allows the frontend to render localized, rich visual diffs, while preserving full machine-readability and PostgreSQL JSONB indexing support.
+- **Tying Audit Creation to Successful Mutations:**
+  - Audit records are only generated when mutations succeed. Failed mutations (due to validation failures, stale concurrency conflicts, or permission denials) do not generate audit records, preventing false audit entries.
+  - In the event of an audit write failure, the error is not silently swallowed; the operation fails so the client is not falsely informed that the mutation succeeded without reliable audit tracking.
+- **Collaborative Comments:**
+  - Comments provide conversational context alongside work items.
+  - Comment author is strictly derived from the authenticated token (`req.user.id`) and validated against team membership.
+  - Comment deletion is authorized only for the comment author or team leadership (ADMIN / TEAM_LEAD).
+
+---
+
 *Future decisions will be added as modules are implemented.*
 
 
