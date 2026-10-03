@@ -41,11 +41,12 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  teamMemberships TeamMember[]
-  createdWorkItems WorkItem[] @relation("CreatedBy")
-  assignedWorkItems WorkItem[] @relation("AssignedTo")
-  comments        Comment[]
-  activities      Activity[]
+  teamMemberships   TeamMember[]
+  createdTeams      Team[]       @relation("CreatedTeams")
+  createdWorkItems  WorkItem[]   @relation("CreatedBy")
+  assignedWorkItems WorkItem[]   @relation("AssignedTo")
+  comments          Comment[]
+  activities        Activity[]
   idempotencyRecords IdempotencyRecord[]
 
   @@map("users")
@@ -54,15 +55,18 @@ model User {
 // ─── Team ───────────────────────────────────────────────
 
 model Team {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid())
+  name        String   @unique
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   // Relations
+  createdBy User         @relation("CreatedTeams", fields: [createdById], references: [id])
   members   TeamMember[]
   workItems WorkItem[]
 
+  @@index([createdById])
   @@map("teams")
 }
 

@@ -133,4 +133,18 @@ This document records key architectural and engineering decisions made during de
 
 ---
 
+## Phase 2A — Teams
+
+### ED-015: Team Ownership via `createdById` and Authentication Middleware
+
+**Decision:**
+- Established an explicit ownership relation on `Team` via `createdById` referencing `User.id` (`@relation("CreatedTeams")`), indexed with `@@index([createdById])`. This represents the minimal, non-disruptive schema change needed to record team creation before membership/roles are introduced.
+- Introduced `authenticate` Express middleware in `src/middleware/authenticate.ts` that enforces Bearer token presence, verifies signature with `jwt.verify`, and populates `req.user.id`.
+- All team routes (`POST /api/teams`, `GET /api/teams`, `GET /api/teams/:id`) require authentication.
+- Team names must be unique. Duplicate team names return HTTP 409 `TEAM_ALREADY_EXISTS`.
+- Input validation for team creation (`createTeamSchema`) is enforced via Zod (`name`: required, trimmed, min 1, max 100 characters).
+- Full team membership, roles (ADMIN, TEAM_LEAD, MEMBER), and resource-level authorization are intentionally postponed to later phases.
+
+---
+
 *Future decisions will be added as modules are implemented.*
